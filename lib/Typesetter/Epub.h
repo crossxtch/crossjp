@@ -26,14 +26,20 @@ class EpubBook {
   using ProgressFn = void (*)(void* ctx, uint16_t done, uint16_t total);
 
   // pageW/pageH are the logical portrait. picturePath receives PIC1 pages. Either may be empty.
+  // `maxSpines` of 0xFFFF ingests the whole spine (the historical open). A smaller
+  // count ingests [spineBegin, spineBegin + maxSpines). `appendAtoms` keeps the
+  // IRA6 prefix and truncates it back to `atomKeep` before writing the next slice.
   bool open(const char* epubPath, const char* atomPath, ProgressFn progress = nullptr, void* progressCtx = nullptr,
-            uint16_t pageW = 0, uint16_t pageH = 0, const char* picturePath = nullptr);
+            uint16_t pageW = 0, uint16_t pageH = 0, const char* picturePath = nullptr, uint16_t spineBegin = 0,
+            uint16_t maxSpines = 0xFFFF, bool appendAtoms = false, uint32_t atomKeep = 0);
   void close();
 
   const char* title() const { return bookTitle; }
   const char* author() const { return bookAuthor; }
   WritingMode bookMode() const { return mode; }
   uint16_t spineCount() const { return nSpine; }
+  // One past the last spine this open() walked. Equals spineCount() when the file is finished.
+  uint16_t ingestedEnd() const { return sliceEnd; }
   const char* lastError() const { return error; }
 
   struct Spine {
@@ -48,6 +54,7 @@ class EpubBook {
     uint8_t kind = kOther;
     uint8_t compact = 0;
     uint8_t hasMode = 0;
+    uint8_t done = 0;
     WritingMode mode = WritingMode::VerticalRl;
     char title[64]{};
   };
@@ -57,6 +64,7 @@ class EpubBook {
     char title[80]{};
     char href[96]{};
     uint32_t atomOff = 0xFFFFFFFFu;
+    uint16_t spine = 0xFFFFu;
   };
   uint16_t tocCount() const { return nToc; }
   const TocEntry& toc(uint16_t i) const { return tocs[i]; }
@@ -73,6 +81,7 @@ class EpubBook {
   char ncxHref[96]{};
   char navHref[96]{};
   WritingMode mode = WritingMode::VerticalRl;
+  uint16_t sliceEnd = 0;
   const char* error = "closed";
 
   bool parseContainer(char* opfName, size_t cap);

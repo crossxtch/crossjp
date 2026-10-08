@@ -10,12 +10,7 @@
 
 namespace {
 
-// TID7: header, then one 7-byte record per page (offset, mode, picture).
-// TID6 kept three RAM vectors and operator new aborted on a long series.
-constexpr uint32_t kIndexMagic = 0x37444954u;
-constexpr uint32_t kIndexPayload = 24;
-constexpr uint16_t kMaxPages = 65535;
-
+// TID7 records are 7 bytes, so the offset is not an aligned store.
 void putU32(uint8_t* d, const uint32_t v) {
   d[0] = static_cast<uint8_t>(v);
   d[1] = static_cast<uint8_t>(v >> 8);
@@ -143,8 +138,8 @@ bool TypesetBook::loadFont(const char* fontPath) {
   return true;
 }
 
-bool TypesetBook::open(const char* path, ts::EpubBook::ProgressFn progress, void* progressCtx,
-                      const char* fontPath) {
+bool TypesetBook::open(const char* path, ts::EpubBook::ProgressFn progress, void* progressCtx, const char* fontPath,
+                      const uint32_t resumePage, const uint32_t resumeAtom) {
   close();
   if (!path || path[0] == '\0') {
     error = "no path";
@@ -188,6 +183,10 @@ bool TypesetBook::open(const char* path, ts::EpubBook::ProgressFn progress, void
   snprintf(atomPath, sizeof(atomPath), "%s", primary);
   sourceSize = primarySize;
   const bool epub = endsWithI(filepath, ".epub");
+  char cursorFile[64];
+  cursorPath(cursorFile, sizeof(cursorFile));
+  const bool cursorPresent = Storage.exists(cursorFile);
+  loadCursor();
   bool fresh = atomCacheFresh();
   if (!fresh && Storage.exists(alt)) {
     snprintf(atomPath, sizeof(atomPath), "%s", alt);
@@ -198,15 +197,57 @@ bool TypesetBook::open(const char* path, ts::EpubBook::ProgressFn progress, void
       sourceSize = primarySize;
     }
   }
-  if (epub && fresh && !loadChapterSidecar()) {
+  // A cursor that does not match this book file must not keep the old atoms.
+  if (cursorPresent && !cursorOk) {
     fresh = false;
-    LOG_INF("TS", "Reingest for chapter TOC");
   }
+  if (fresh && cursorOk && atomBytes >= 4 && sourceSize > atomBytes) {
+    HalFile torn = Storage.open(atomPath, O_RDWR);
+    if (!torn || !torn.truncate(atomBytes)) {
+      fresh = false;
+    } else {
+      sourceSize = atomBytes;
+      LOG_INF("TS", "Trimmed atom to cursor %lu", static_cast<unsigned long>(atomBytes));
+    }
+  }
+  // A finished atom stays. A missing chapter sidecar used to force a full
+  // reingest, which throws away a good TID7 (a long series is minutes).
+  if (epub && fresh && !cursorOk) {
+    if (!loadChapterSidecar()) {
+      LOG_INF("TS", "No chapter sidecar");
+    }
+  }
+
+  bool rebuilt = false;
   if (fresh) {
     LOG_INF("TS", "time ingest 0ms skip (atom cache)");
+    if (!cursorOk) {
+      ingestDone = true;
+      atomBytes = sourceSize;
+    } else {
+      ingestDone = spineCount > 0 && nextSpine >= spineCount;
+    }
+    if (!atoms.open(atomPath)) {
+      error = "atom open";
+      close();
+      return false;
+    }
+    atomsLive = true;
+    if (loadIndex() && buildFinished()) {
+      if (chapterMarks.empty()) {
+        loadChapterSidecar();
+      }
+      applyChapters();
+      partialOpen = false;
+      showPage = resumePage;
+      opened = true;
+      error = "";
+      LOG_INF("TS", "Open %s pages=%u em=%u chapters=%u cache total %lums", filepath, pageCount(), layoutOpt.em,
+              static_cast<unsigned>(chapters.size()), millis() - t0);
+      return true;
+    }
   } else {
-    // The reading font stays open across ingest otherwise, and the atom
-    // create shares the card with that multi-megabyte read.
+    dropPartialCache();
     font.releaseFile();
     if (!replaceAtomFile(atomPath)) {
       const char* other = strcmp(atomPath, primary) == 0 ? alt : primary;
@@ -219,44 +260,93 @@ bool TypesetBook::open(const char* path, ts::EpubBook::ProgressFn progress, void
         return false;
       }
     }
+    rebuilt = true;
     const unsigned long tIngest = millis();
     if (epub) {
-      if (!ingestEpub(progress, progressCtx)) {
+      if (!ingestSlice(1, progress, progressCtx)) {
         close();
         return false;
       }
     } else if (!ingestTxt()) {
       close();
       return false;
+    } else {
+      sourceSize = fileSizeOf(atomPath);
+      atomBytes = sourceSize;
+      ingestDone = true;
+      if (!reopenAtoms()) {
+        close();
+        return false;
+      }
     }
-    sourceSize = fileSizeOf(atomPath);
-    LOG_INF("TS", "time ingest %lums", millis() - tIngest);
+    LOG_INF("TS", "time ingest %lums slice", millis() - tIngest);
   }
 
-  if (!atoms.open(atomPath)) {
-    error = "atom open";
-    close();
-    return false;
+  uint32_t target = rebuilt ? 0 : resumeAtom;
+  if (!rebuilt && target == 0 && resumePage > 0) {
+    uint32_t peeked = 0;
+    if (peekAtom(resumePage, peeked)) {
+      target = peeked;
+    }
+  }
+  if (target < 4) {
+    target = 4;
+  }
+  uint32_t origin = 4;
+  uint16_t oSpine = 0;
+  if (target > 4) {
+    for (const auto& m : chapterMarks) {
+      if (m.atomOff == 0xFFFFFFFFu || m.atomOff > target || m.atomOff < origin) {
+        continue;
+      }
+      origin = m.atomOff;
+      if (m.spine != 0xFFFFu) {
+        oSpine = m.spine;
+      }
+    }
   }
 
   const unsigned long tIdx = millis();
-  const bool cached = loadIndex();
-  if (!cached && !buildIndex()) {
+  const bool haveWindow = indexFile && nPages > 0 && target >= originAtom;
+  if (!haveWindow) {
+    if (!beginRange(origin, oSpine)) {
+      close();
+      return false;
+    }
+  }
+  const bool covered = indexUntil(target, progress, progressCtx);
+  if (!covered && nPages == 0) {
     close();
     return false;
   }
-  LOG_INF("TS", "time index %lums %s pages=%u", millis() - tIdx, cached ? "cache" : "build", pageCount());
+  if (!frontFrozen) {
+    freezeFront();
+  }
+  partialOpen = !buildFinished();
+  if (pageCovers(target)) {
+    showPage = globalForAtom(target);
+  } else if (!rebuilt && resumePage >= frontPages && resumePage < static_cast<uint32_t>(frontPages) + nPages) {
+    showPage = resumePage;
+  } else {
+    showPage = frontPages;
+  }
   applyChapters();
+  suspendIndex();
   opened = true;
   error = "";
+  LOG_INF("TS", "time index %lums partial=%d pages=%u/%u", millis() - tIdx, partialOpen ? 1 : 0, nPages, pageCount());
   LOG_INF("TS", "Open %s pages=%u em=%u chapters=%u total %lums", filepath, pageCount(), layoutOpt.em,
           static_cast<unsigned>(chapters.size()), millis() - t0);
   return true;
 }
 
 void TypesetBook::close() {
+  if (opened && !buildFinished()) {
+    suspendIndex();
+  }
   opened = false;
   atoms.close();
+  atomsLive = false;
   font.close();
   indexFile.close();
   nPages = 0;
@@ -265,6 +355,23 @@ void TypesetBook::close() {
   chapterMarks.clear();
   sourceSize = 0;
   bookSrcSize = 0;
+  ingestDone = false;
+  coversEnd = false;
+  pendingPage = false;
+  frontFrozen = false;
+  extendFailed = false;
+  partialOpen = false;
+  cursorOk = false;
+  indexBase = kIndexPayload;
+  nextSpine = 0;
+  spineCount = 0;
+  originSpine = 0;
+  frontPages = 0;
+  runMode = 0;
+  originAtom = 4;
+  indexedAtom = 4;
+  atomBytes = 0;
+  showPage = 0;
   loadedPage = 0xFFFFFFFFu;
   loadedCount = 0;
   loadedPicture = 0;
@@ -400,16 +507,35 @@ bool TypesetBook::loadChapterSidecar() {
   return true;
 }
 
+const std::vector<ts::ChapterInfo>& TypesetBook::getChapters() {
+  if (opened) {
+    applyChapters();
+  }
+  return chapters;
+}
+
 void TypesetBook::applyChapters() {
-  chapters.clear();
   if (chapterMarks.empty() || nPages == 0 || !indexFile) {
+    for (auto& ch : chapters) {
+      ch.ready = false;
+    }
     return;
   }
-  chapters.reserve(chapterMarks.size());
-  for (const auto& m : chapterMarks) {
-    ts::ChapterInfo ch;
-    ch.name = m.name;
-    chapters.push_back(std::move(ch));
+  // Rebuilding the titles allocates. The chapter screen holds this vector, and
+  // a second copy of every name abort()s once the font cache has split the heap.
+  if (chapters.size() != chapterMarks.size()) {
+    chapters.clear();
+    chapters.reserve(chapterMarks.size());
+    for (const auto& m : chapterMarks) {
+      ts::ChapterInfo ch;
+      ch.name = m.name;
+      chapters.push_back(std::move(ch));
+    }
+  }
+  for (auto& ch : chapters) {
+    ch.ready = false;
+    ch.startPage = 0;
+    ch.endPage = 0;
   }
   std::vector<uint16_t> order(chapterMarks.size());
   for (uint16_t i = 0; i < order.size(); ++i) {
@@ -418,7 +544,7 @@ void TypesetBook::applyChapters() {
   std::sort(order.begin(), order.end(), [&](const uint16_t a, const uint16_t b) {
     return chapterMarks[a].atomOff < chapterMarks[b].atomOff;
   });
-  if (!indexFile.seekSet(kIndexPayload)) {
+  if (!indexFile.seekSet(indexBase)) {
     return;
   }
   uint8_t buf[7 * 32];
@@ -436,21 +562,56 @@ void TypesetBook::applyChapters() {
       const uint8_t* b = buf + static_cast<size_t>(r) * 7;
       const uint32_t off = static_cast<uint32_t>(b[0]) | (static_cast<uint32_t>(b[1]) << 8) |
                            (static_cast<uint32_t>(b[2]) << 16) | (static_cast<uint32_t>(b[3]) << 24);
-      while (oi < order.size() && chapterMarks[order[oi]].atomOff < off) {
+      while (oi < order.size()) {
+        const uint32_t markAt = chapterMarks[order[oi]].atomOff;
+        if (markAt == 0xFFFFFFFFu || markAt < originAtom) {
+          ++oi;
+          continue;
+        }
+        if (markAt >= off) {
+          break;
+        }
         chapters[order[oi]].startPage = page > 0 ? static_cast<uint16_t>(page - 1) : 0;
+        chapters[order[oi]].ready = true;
         ++oi;
       }
       ++page;
     }
   }
   while (oi < order.size()) {
-    chapters[order[oi]].startPage = static_cast<uint16_t>(nPages - 1);
+    const uint32_t markAt = chapterMarks[order[oi]].atomOff;
+    const bool place =
+        markAt != 0xFFFFFFFFu && markAt >= originAtom && (coversEnd || markAt < indexedAtom) && nPages > 0;
+    if (place) {
+      chapters[order[oi]].startPage = static_cast<uint16_t>(nPages - 1);
+      chapters[order[oi]].ready = true;
+    }
     ++oi;
   }
   const uint16_t last = static_cast<uint16_t>(nPages - 1);
   for (size_t i = 0; i < chapters.size(); ++i) {
-    const uint16_t next = (i + 1 < chapters.size()) ? chapters[i + 1].startPage : static_cast<uint16_t>(last + 1);
-    chapters[i].endPage = next > chapters[i].startPage ? static_cast<uint16_t>(next - 1) : chapters[i].startPage;
+    if (!chapters[i].ready) {
+      continue;
+    }
+    uint16_t end = last;
+    for (size_t j = i + 1; j < chapters.size(); ++j) {
+      if (!chapters[j].ready) {
+        continue;
+      }
+      end = chapters[j].startPage > chapters[i].startPage ? static_cast<uint16_t>(chapters[j].startPage - 1)
+                                                         : chapters[i].startPage;
+      break;
+    }
+    chapters[i].endPage = end;
+  }
+  for (auto& ch : chapters) {
+    if (!ch.ready) {
+      continue;
+    }
+    const uint32_t start = static_cast<uint32_t>(ch.startPage) + frontPages;
+    const uint32_t end = static_cast<uint32_t>(ch.endPage) + frontPages;
+    ch.startPage = static_cast<uint16_t>(start > 65535u ? 65535u : start);
+    ch.endPage = static_cast<uint16_t>(end > 65535u ? 65535u : end);
   }
   LOG_INF("TS", "Chapters %u", static_cast<unsigned>(chapters.size()));
 }
@@ -468,9 +629,13 @@ bool TypesetBook::atomCacheFresh() const {
   }
   // A cache-clear used to leave a file of page-breaks, about one byte each.
   // A real cover book is that small too, and its PIC1 header says so.
-  if (endsWithI(filepath, ".epub") && sourceSize < 2048 &&
+  // A resumed slice is also small until the next chapter is appended.
+  if (!cursorOk && endsWithI(filepath, ".epub") && sourceSize < 2048 &&
       !pictureSidecarFresh(picturePath, static_cast<uint16_t>(layoutOpt.width),
                            static_cast<uint16_t>(layoutOpt.height))) {
+    return false;
+  }
+  if (cursorOk && sourceSize < atomBytes) {
     return false;
   }
   char p[64];
@@ -485,8 +650,11 @@ bool TypesetBook::atomCacheFresh() const {
   if (idx.read(&magic, 4) != 4) {
     return true;
   }
-  if (magic == kIndexMagic) {
-    if (idx.read(&atomSz, 4) != 4 || atomSz != sourceSize) {
+  if (magic == kIndexMagic || magic == kIndexPartial) {
+    if (idx.read(&atomSz, 4) != 4) {
+      return false;
+    }
+    if (magic == kIndexMagic && atomSz != sourceSize && !(cursorOk && sourceSize >= atomBytes && atomBytes >= 4)) {
       return false;
     }
     if (idx.read(&srcSz, 4) != 4 || (bookSrcSize != 0 && srcSz != bookSrcSize)) {
@@ -501,7 +669,7 @@ bool TypesetBook::readPage(const uint32_t index, uint32_t& off, uint8_t& mode, u
     return false;
   }
   uint8_t b[7];
-  const uint32_t at = kIndexPayload + index * 7;
+  const uint32_t at = indexBase + index * 7;
   if (!indexFile.seekSet(at) || indexFile.read(b, 7) != 7) {
     return false;
   }
@@ -555,7 +723,7 @@ bool TypesetBook::setLastPicture(const uint16_t pic) {
     indexBuf[indexBufN - 1] = static_cast<uint8_t>(pic >> 8);
     return true;
   }
-  const uint32_t end = kIndexPayload + static_cast<uint32_t>(nPages) * 7;
+  const uint32_t end = indexBase + static_cast<uint32_t>(nPages) * 7;
   const uint8_t b[2] = {static_cast<uint8_t>(pic), static_cast<uint8_t>(pic >> 8)};
   if (!indexFile.seekSet(end - 2) || indexFile.write(b, 2) != 2 || !indexFile.seekSet(end)) {
     error = "index write";
@@ -574,131 +742,6 @@ bool TypesetBook::finishIndex() {
     return false;
   }
   indexFile.probeContiguous();
-  return true;
-}
-
-bool TypesetBook::loadIndex() {
-  indexFile.close();
-  nPages = 0;
-  indexBufN = 0;
-  char p[64];
-  indexPath(p, sizeof(p));
-  if (!Storage.openFileForRead("TS", p, indexFile)) {
-    return false;
-  }
-  uint32_t magic = 0;
-  uint32_t atomSz = 0;
-  uint32_t srcSz = 0;
-  uint16_t em = 0;
-  uint16_t w = 0;
-  uint16_t h = 0;
-  uint16_t mode = 0;
-  uint32_t count = 0;
-  const bool headerOk = indexFile.read(&magic, 4) == 4 && magic == kIndexMagic && indexFile.read(&atomSz, 4) == 4 &&
-                        atomSz == sourceSize && indexFile.read(&srcSz, 4) == 4 && srcSz == bookSrcSize &&
-                        indexFile.read(&em, 2) == 2 && em == layoutOpt.em && indexFile.read(&w, 2) == 2 &&
-                        w == static_cast<uint16_t>(layoutOpt.width) && indexFile.read(&h, 2) == 2 &&
-                        h == static_cast<uint16_t>(layoutOpt.height) && indexFile.read(&mode, 2) == 2 &&
-                        indexFile.read(&count, 4) == 4 && count > 0 && count <= kMaxPages &&
-                        indexFile.fileSize() >= kIndexPayload + count * 7;
-  if (!headerOk) {
-    indexFile.close();
-    return false;
-  }
-  layoutOpt.mode = static_cast<ts::WritingMode>(mode);
-  nPages = static_cast<uint16_t>(count);
-  indexFile.probeContiguous();
-  LOG_INF("TS", "Index %s (%u pages)", p, static_cast<unsigned>(count));
-  return true;
-}
-
-bool TypesetBook::buildIndex() {
-  indexFile.close();
-  nPages = 0;
-  indexBufN = 0;
-  char p[64];
-  indexPath(p, sizeof(p));
-  Storage.ensureDirectoryExists("/.crossjp");
-  if (!Storage.openFileForWrite("TS", p, indexFile)) {
-    error = "index file";
-    return false;
-  }
-  const uint32_t magic = kIndexMagic;
-  const uint32_t atomSz = sourceSize;
-  const uint32_t srcSz = bookSrcSize;
-  const uint16_t em = layoutOpt.em;
-  const uint16_t w = static_cast<uint16_t>(layoutOpt.width);
-  const uint16_t h = static_cast<uint16_t>(layoutOpt.height);
-  const uint16_t modeWord = static_cast<uint16_t>(layoutOpt.mode);
-  const uint32_t count = 0;
-  if (indexFile.write(&magic, 4) != 4 || indexFile.write(&atomSz, 4) != 4 || indexFile.write(&srcSz, 4) != 4 ||
-      indexFile.write(&em, 2) != 2 || indexFile.write(&w, 2) != 2 || indexFile.write(&h, 2) != 2 ||
-      indexFile.write(&modeWord, 2) != 2 || indexFile.write(&count, 4) != 4) {
-    error = "index write";
-    return false;
-  }
-  LOG_INF("TS", "index build");
-  // Byte 0 is the IRA6 header. The first page replays from the first atom.
-  const ts::WritingMode bookMode = layoutOpt.mode;
-  if (!appendPage(4, static_cast<uint8_t>(bookMode), 0)) {
-    return false;
-  }
-  atoms.seek(4);
-  layouter.begin(layoutOpt);
-  ts::Atom atom{};
-  bool pendingStart = false;
-  ts::WritingMode cur = bookMode;
-  while (true) {
-    const uint32_t atomPos = atoms.position();
-    if (!atoms.next(atom)) {
-      break;
-    }
-    const bool isMode = atom.kind == ts::AtomKind::Mode;
-    const ts::WritingMode nextMode =
-        isMode ? (atom.cp == 1 ? ts::WritingMode::HorizontalTb : ts::WritingMode::VerticalRl) : cur;
-    const bool complete = layouter.feed(atom, atomPos);
-    if (pendingStart && layouter.currentGlyphCount() > 0) {
-      if (!appendPage(layouter.currentPagePos(), static_cast<uint8_t>(cur), 0)) {
-        return false;
-      }
-      pendingStart = false;
-    }
-    if (isMode) {
-      cur = nextMode;
-    }
-    if (!complete) {
-      continue;
-    }
-    layouter.clearPage();
-    const uint16_t taken = layouter.takenPicture();
-    const uint16_t deferred = layouter.deferredPicture();
-    if (taken != 0) {
-      if (pendingStart) {
-        if (!appendPage(atomPos, static_cast<uint8_t>(cur), taken)) {
-          return false;
-        }
-      } else if (!setLastPicture(taken)) {
-        return false;
-      }
-      pendingStart = true;
-    } else if (deferred != 0) {
-      if (!appendPage(atomPos, static_cast<uint8_t>(cur), deferred)) {
-        return false;
-      }
-      pendingStart = true;
-    } else if (layouter.currentGlyphCount() > 0) {
-      if (!appendPage(layouter.currentPagePos(), static_cast<uint8_t>(cur), 0)) {
-        return false;
-      }
-      pendingStart = false;
-    } else {
-      pendingStart = true;
-    }
-  }
-  if (!finishIndex()) {
-    return false;
-  }
-  LOG_INF("TS", "Built index %u pages", nPages);
   return true;
 }
 

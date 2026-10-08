@@ -303,7 +303,7 @@ struct PngHold {
 
 }  // namespace
 
-bool PictureWriter::begin(const char* path, const uint16_t w, const uint16_t h) {
+bool PictureWriter::begin(const char* path, const uint16_t w, const uint16_t h, const bool append) {
   end();
   if (!path || w < 4 || h == 0 || (w % 4) != 0) {
     return false;
@@ -313,6 +313,25 @@ bool PictureWriter::begin(const char* path, const uint16_t w, const uint16_t h) 
   rowBytes = static_cast<uint16_t>(w / 4);
   pageBytes = static_cast<uint32_t>(rowBytes) * h;
   n = 0;
+  if (append) {
+    HalFile probe;
+    uint8_t hdr[10];
+    if (Storage.openFileForRead("PIC", path, probe) && probe.read(hdr, sizeof(hdr)) == static_cast<int>(sizeof(hdr))) {
+      const uint32_t magic = static_cast<uint32_t>(hdr[0]) | (static_cast<uint32_t>(hdr[1]) << 8) |
+                             (static_cast<uint32_t>(hdr[2]) << 16) | (static_cast<uint32_t>(hdr[3]) << 24);
+      const uint16_t count = static_cast<uint16_t>(hdr[4] | (hdr[5] << 8));
+      const uint16_t pw = static_cast<uint16_t>(hdr[6] | (hdr[7] << 8));
+      const uint16_t ph = static_cast<uint16_t>(hdr[8] | (hdr[9] << 8));
+      probe.close();
+      if (magic == kPictureMagic && pw == w && ph == h && count <= kMaxPictures) {
+        out = Storage.open(path, O_RDWR);
+        if (out) {
+          n = count;
+          return true;
+        }
+      }
+    }
+  }
   if (!Storage.openFileForWrite("PIC", path, out)) {
     pageW = 0;
     return false;

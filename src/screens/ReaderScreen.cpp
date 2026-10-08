@@ -32,6 +32,36 @@ ReaderScreen::ReaderScreen(Gfx& gfx, MappedInput& input, const char* path) : Scr
 
 uint16_t ReaderScreen::bookPageCount() const { return book ? book->pageCount() : 0; }
 
+void ReaderScreen::clampPage() {
+  if (!book || book->indexedSpan() == 0) {
+    page = 0;
+    return;
+  }
+  const uint32_t front = book->pagesBefore();
+  const uint32_t end = front + book->indexedSpan();
+  if (page >= end) {
+    page = end - 1;
+  }
+  if (page < front) {
+    page = front;
+  }
+}
+
+uint32_t ReaderScreen::viewPage() const {
+  if (!book || book->indexedSpan() == 0) {
+    return 0;
+  }
+  const uint32_t front = book->pagesBefore();
+  if (page < front) {
+    return 0;
+  }
+  const uint32_t local = page - front;
+  if (local >= book->indexedSpan()) {
+    return static_cast<uint32_t>(book->indexedSpan() - 1);
+  }
+  return local;
+}
+
 const char* ReaderScreen::bookError() const {
   if (book) {
     const char* err = book->lastError();
@@ -52,17 +82,26 @@ void ReaderScreen::loadProgress() {
   HalFile f;
   if (!Storage.openFileForRead("PRG", p, f)) {
     page = 0;
+    resumeAtom = 0;
     LOG_INF("RDR", "No progress file, start at 0");
     return;
   }
   uint32_t saved = 0;
-  if (f.read(&saved, sizeof(saved)) == static_cast<int>(sizeof(saved))) {
-    page = saved;
-    LOG_INF("RDR", "Progress %s -> page %lu", p, static_cast<unsigned long>(page));
-  } else {
+  if (f.read(&saved, sizeof(saved)) != static_cast<int>(sizeof(saved))) {
     page = 0;
+    resumeAtom = 0;
     LOG_ERR("RDR", "Progress file %s unreadable", p);
+    return;
   }
+  page = saved;
+  uint32_t atom = 0;
+  if (f.read(&atom, sizeof(atom)) == static_cast<int>(sizeof(atom))) {
+    resumeAtom = atom;
+  } else {
+    resumeAtom = 0;
+  }
+  LOG_INF("RDR", "Progress %s -> page %lu atom %lu", p, static_cast<unsigned long>(page),
+          static_cast<unsigned long>(resumeAtom));
 }
 
 void ReaderScreen::saveProgress() const {
@@ -74,13 +113,17 @@ void ReaderScreen::saveProgress() const {
     LOG_ERR("PRG", "Could not write %s", p);
     return;
   }
+  const uint32_t atom = book ? book->atomForPage(page) : 0;
   f.write(&page, sizeof(page));
+  f.write(&atom, sizeof(atom));
 }
 
 void ReaderScreen::onEnter() {
   Screen::onEnter();
   pagesUntilFull = settings.refreshEveryNPages;
   lastOpenProgressMs = 0;
+  painted = false;
+  loadProgress();
   bool ok = false;
   book = makeUniqueNoThrow<TypesetBook>();
   if (!book) {
@@ -91,7 +134,7 @@ void ReaderScreen::onEnter() {
     if (!ReadingFont::activePath(fontPath, sizeof(fontPath))) {
       fontPath[0] = '\0';
     }
-    ok = book->open(bookPath, &ReaderScreen::onOpenProgress, this, fontPath[0] ? fontPath : nullptr);
+    ok = book->open(bookPath, &ReaderScreen::onOpenProgress, this, fontPath[0] ? fontPath : nullptr, page, resumeAtom);
     if (!ok) {
       openError = book->lastError();
     }
@@ -103,11 +146,13 @@ void ReaderScreen::onEnter() {
     return;
   }
   loaded = true;
-  loadProgress();
-  if (page >= bookPageCount()) {
+  if (book->openedPartial()) {
+    page = book->showAt();
+  } else if (page >= bookPageCount()) {
     LOG_INF("RDR", "Saved page %lu past end (%u), clamping", static_cast<unsigned long>(page), bookPageCount());
     page = bookPageCount() > 0 ? bookPageCount() - 1 : 0;
   }
+  clampPage();
   snprintf(settings.lastBookPath, sizeof(settings.lastBookPath), "%s", bookPath);
   settings.save();
   LOG_INF("RDR", "Open %s page %lu/%u '%s'", bookPath, static_cast<unsigned long>(page + 1), bookPageCount(),
@@ -166,16 +211,54 @@ void ReaderScreen::loop() {
     const uint32_t maxForward = bookPageCount() > 0 ? bookPageCount() - 1 - page : 0;
     const uint32_t step = std::min(static_cast<uint32_t>(delta), maxForward);
     if (step > 0) {
-      page += step;
-      moved = true;
+      const uint32_t target = page + step;
+      const uint32_t front = book->pagesBefore();
+      const uint32_t indexedEnd = front + book->indexedSpan();
+      if (target < front || target >= indexedEnd) {
+        const uint32_t atom = book->atomForPage(page);
+        const uint16_t frontBefore = book->pagesBefore();
+        lastOpenProgressMs = 0;
+        if (book->ensureGlobal(target, &ReaderScreen::onOpenProgress, this)) {
+          if (book->pagesBefore() != frontBefore) {
+            const uint32_t here = book->globalForAtom(atom);
+            page = here;
+          } else {
+            page = target;
+          }
+          clampPage();
+          moved = true;
+        }
+      } else {
+        page = target;
+        moved = true;
+      }
     } else {
       LOG_DBG("RDR", "Already last page");
     }
   } else if (delta < 0) {
+    const bool atFront = page <= book->pagesBefore() && book->pagesBefore() > 0;
     const uint32_t step = std::min(static_cast<uint32_t>(-delta), page);
-    if (step > 0) {
-      page -= step;
-      moved = true;
+    if (step > 0 || atFront) {
+      const uint32_t target = step > 0 && page >= step ? page - step : 0;
+      const uint32_t front = book->pagesBefore();
+      if (target < front) {
+        const uint32_t atom = book->atomForPage(page);
+        const uint16_t frontBefore = book->pagesBefore();
+        lastOpenProgressMs = 0;
+        if (book->ensureGlobal(target, &ReaderScreen::onOpenProgress, this)) {
+          if (book->pagesBefore() != frontBefore) {
+            const uint32_t here = book->globalForAtom(atom);
+            page = here > step ? here - step : 0;
+          } else {
+            page = target;
+          }
+          clampPage();
+          moved = true;
+        }
+      } else {
+        page = target;
+        moved = true;
+      }
     } else {
       LOG_DBG("RDR", "Already first page");
     }
@@ -184,6 +267,8 @@ void ReaderScreen::loop() {
     LOG_DBG("RDR", "Page %lu/%u", static_cast<unsigned long>(page + 1), bookPageCount());
     saveProgress();
     requestUpdate();
+  } else if (painted && input.queuedPageDelta() == 0 && book) {
+    book->extendAhead(page, 5);
   }
 }
 
@@ -237,12 +322,44 @@ void ReaderScreen::showOpenProgress(const uint16_t done, const uint16_t total) {
 }
 
 void ReaderScreen::jumpToPage(const uint32_t targetPage) {
-  if (!loaded || targetPage >= bookPageCount()) {
+  if (!loaded || !book || bookPageCount() == 0) {
     return;
   }
-  page = targetPage;
+  uint32_t target = targetPage;
+  if (target >= bookPageCount()) {
+    target = bookPageCount() - 1;
+  }
+  const uint32_t front = book->pagesBefore();
+  const uint32_t indexedEnd = front + book->indexedSpan();
+  if (target < front || target >= indexedEnd) {
+    lastOpenProgressMs = 0;
+    if (!book->ensureGlobal(target, &ReaderScreen::onOpenProgress, this)) {
+      LOG_ERR("RDR", "Page %lu not ready: %s", static_cast<unsigned long>(target + 1), bookError());
+    }
+  }
+  page = target;
+  clampPage();
   pagesUntilFull = 1;
   LOG_INF("RDR", "Jumped to page %lu/%u", static_cast<unsigned long>(page + 1), bookPageCount());
+  saveProgress();
+  requestUpdate();
+}
+
+void ReaderScreen::openChapter(const uint16_t chapterIndex) {
+  if (!loaded || !book) {
+    return;
+  }
+  uint32_t target = 0;
+  lastOpenProgressMs = 0;
+  if (!book->ensureChapter(chapterIndex, target, &ReaderScreen::onOpenProgress, this)) {
+    LOG_ERR("RDR", "Chapter %u not ready: %s", static_cast<unsigned>(chapterIndex), bookError());
+    return;
+  }
+  page = target;
+  clampPage();
+  pagesUntilFull = 1;
+  LOG_INF("RDR", "Chapter %u page %lu/%u", static_cast<unsigned>(chapterIndex), static_cast<unsigned long>(page + 1),
+          bookPageCount());
   saveProgress();
   requestUpdate();
 }
@@ -254,12 +371,14 @@ void ReaderScreen::render() {
   }
 
   const unsigned long blitStart = millis();
-  const bool painted = book && book->drawPage(gfx, page, pagesUntilFull, settings.refreshEveryNPages);
-  if (!painted) {
+  const uint32_t local = viewPage();
+  const bool drew = book && book->drawPage(gfx, local, pagesUntilFull, settings.refreshEveryNPages);
+  if (!drew) {
     LOG_ERR("RDR", "Blit page %lu failed: %s", static_cast<unsigned long>(page), bookError());
     showStatus(uiText::error(bookError()));
     return;
   }
+  painted = true;
   const unsigned long blitMs = millis() - blitStart;
   LOG_DBG("RDR", "Blit page %lu/%u %lums", static_cast<unsigned long>(page + 1), bookPageCount(), blitMs);
   if (power::tiltLocked()) {
@@ -271,7 +390,7 @@ void ReaderScreen::render() {
   const int queued = input.queuedPageDelta();
   if (queued >= 0 && queued <= 1) {
     if (book) {
-      book->prefetchForward(page);
+      book->prefetchForward(local);
     }
   } else {
     LOG_DBG("RDR", "Skip prefetch (queued delta %d)", queued);

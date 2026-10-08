@@ -25,6 +25,27 @@ bool readU32(HalFile& f, uint32_t& v) {
 
 }  // namespace
 
+bool AtomWriter::openAppend(const char* path, const uint32_t keepBytes) {
+  pos = 0;
+  healthy = true;
+  noSpace = false;
+  if (!path || keepBytes < 4) {
+    return false;
+  }
+  file = Storage.open(path, O_RDWR);
+  if (!file) {
+    return false;
+  }
+  uint32_t magic = 0;
+  if (!file.seekSet(0) || file.read(&magic, 4) != 4 || magic != kAtomMagic || file.fileSize() < keepBytes ||
+      !file.truncate(keepBytes) || !file.seekSet(keepBytes)) {
+    close();
+    return false;
+  }
+  pos = keepBytes;
+  return true;
+}
+
 bool AtomWriter::open(const char* path) {
   pos = 0;
   healthy = true;

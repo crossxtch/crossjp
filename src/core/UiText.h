@@ -52,6 +52,8 @@
   X(goToPageRange, "ページ指定 (%lu / %u)") \
   X(chapterN, "第%d章 (p%u-%u)") \
   X(chapterNamed, "%s (p%u-%u)") \
+  X(chapterNOnly, "第%d章") \
+  X(chapterNamedOnly, "%s") \
   X(goToPage, "ページ指定") \
   X(currentlyOnPage, "現在 %lu ページ") \
   X(noFonts, "フォントがありません") \

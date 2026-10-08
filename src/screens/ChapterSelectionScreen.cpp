@@ -27,7 +27,7 @@ ChapterSelectionScreen::ChapterSelectionScreen(Gfx& gfx, MappedInput& input, Rea
       pageCount(pageCount) {
   // Row 0 is the synthetic "Go to page" item; chapters start at row 1.
   for (size_t i = 0; i < chapters.size(); ++i) {
-    if (currentPage >= chapters[i].startPage && currentPage <= chapters[i].endPage) {
+    if (chapters[i].ready && currentPage >= chapters[i].startPage && currentPage <= chapters[i].endPage) {
       index = static_cast<int>(i) + 1;
       break;
     }
@@ -66,7 +66,11 @@ void ChapterSelectionScreen::activate() {
   if (chapterIdx >= chapters.size()) {
     return;
   }
-  reader.jumpToPage(chapters[chapterIdx].startPage);
+  if (chapters[chapterIdx].ready) {
+    reader.jumpToPage(chapters[chapterIdx].startPage);
+  } else {
+    reader.openChapter(static_cast<uint16_t>(chapterIdx));
+  }
   finish();
 }
 
@@ -99,7 +103,13 @@ void ChapterSelectionScreen::render() {
       snprintf(label, sizeof(label), uiText::goToPageRange, static_cast<unsigned long>(currentPage + 1), pageCount);
     } else {
       const ts::ChapterInfo& chapter = chapters[static_cast<size_t>(i - 1)];
-      if (chapter.name.empty()) {
+      if (!chapter.ready) {
+        if (chapter.name.empty()) {
+          snprintf(label, sizeof(label), uiText::chapterNOnly, i);
+        } else {
+          snprintf(label, sizeof(label), uiText::chapterNamedOnly, chapter.name.c_str());
+        }
+      } else if (chapter.name.empty()) {
         snprintf(label, sizeof(label), uiText::chapterN, i, chapter.startPage + 1, chapter.endPage + 1);
       } else {
         snprintf(label, sizeof(label), uiText::chapterNamed, chapter.name.c_str(), chapter.startPage + 1,

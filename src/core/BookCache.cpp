@@ -43,6 +43,7 @@ void removeFor(const char* bookPath) {
   drop("c");
   drop("p");
   drop("i");
+  drop("s");
   if (settings.lastBookPath[0] && strcmp(settings.lastBookPath, bookPath) == 0) {
     settings.lastBookPath[0] = '\0';
     settings.save();
@@ -61,9 +62,9 @@ unsigned clearAll() {
       continue;
     }
     const char tag = name[0];
-    const bool sidecar = name[1] == '_' && strchr("abtcpi", tag) != nullptr && strstr(name, ".bin") != nullptr;
+    const bool sidecar = name[1] == '_' && strchr("abtcpis", tag) != nullptr && strstr(name, ".bin") != nullptr;
     const bool work = strcmp(name, "work.xhtml") == 0 || strcmp(name, "work.opf") == 0 ||
-                      strcmp(name, "work.toc") == 0 || strcmp(name, "work.img") == 0;
+                      strcmp(name, "work.toc") == 0 || strcmp(name, "work.img") == 0 || strcmp(name, "work.idx") == 0;
     if (sidecar || work) {
       doomed.emplace_back(name);
     }

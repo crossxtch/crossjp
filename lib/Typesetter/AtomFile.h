@@ -14,6 +14,8 @@ constexpr uint32_t kAtomMagic = 0x36415249u;
 class AtomWriter {
  public:
   bool open(const char* path);
+  // Continue an IRA6 file. Bytes past `keepBytes` are dropped so a torn slice is rewritten.
+  bool openAppend(const char* path, uint32_t keepBytes);
   void close();
   bool write(const Atom& a);
   // False after a short write that did not recover. Later writes do not touch the card.

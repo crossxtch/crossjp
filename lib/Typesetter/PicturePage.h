@@ -19,7 +19,8 @@ class PictureWriter {
   PictureWriter(const PictureWriter&) = delete;
   PictureWriter& operator=(const PictureWriter&) = delete;
 
-  bool begin(const char* path, uint16_t pageW, uint16_t pageH);
+  // `append` keeps ids already stored in a PIC1 file of the same portrait size.
+  bool begin(const char* path, uint16_t pageW, uint16_t pageH, bool append = false);
   void end();
   bool ready() const { return out.isOpen() && pageW > 0; }
   uint16_t count() const { return n; }

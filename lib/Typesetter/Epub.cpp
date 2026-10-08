@@ -308,8 +308,10 @@ void writeChapterMode(AtomWriter& writer, const WritingMode chapterMode) {
 }  // namespace
 
 bool EpubBook::open(const char* epubPath, const char* atomPath, ProgressFn progress, void* progressCtx,
-                    const uint16_t pageW, const uint16_t pageH, const char* picturePath) {
+                    const uint16_t pageW, const uint16_t pageH, const char* picturePath, const uint16_t spineBegin,
+                    const uint16_t maxSpines, const bool appendAtoms, const uint32_t atomKeep) {
   close();
+  const bool wholeBook = spineBegin == 0 && maxSpines == 0xFFFF && !appendAtoms;
   const unsigned long t0 = millis();
   auto report = [&](uint16_t done, uint16_t total) {
     if (progress) {
@@ -362,7 +364,8 @@ bool EpubBook::open(const char* epubPath, const char* atomPath, ProgressFn progr
   // only open SD file.
   zip.releaseFile();
   AtomWriter writer;
-  if (!writer.open(atomPath)) {
+  const bool writerOk = appendAtoms ? writer.openAppend(atomPath, atomKeep) : writer.open(atomPath);
+  if (!writerOk) {
     error = "atom file";
     close();
     return false;
@@ -385,7 +388,7 @@ bool EpubBook::open(const char* epubPath, const char* atomPath, ProgressFn progr
     htmlBytes += zip.at(items[i].zipIndex).uncompSize;
   }
   uint64_t freeB = 0;
-  if (Storage.freeBytes(&freeB)) {
+  if (!appendAtoms && Storage.freeBytes(&freeB)) {
     LOG_INF("EPUB", "room free=%lu KB html=%lu KB", static_cast<unsigned long>(freeB / 1024),
             static_cast<unsigned long>(htmlBytes / 1024));
     if (htmlBytes > 0 && freeB < htmlBytes) {
@@ -402,7 +405,8 @@ bool EpubBook::open(const char* epubPath, const char* atomPath, ProgressFn progr
   }
 
   PictureWriter pics;
-  const bool picsOn = pageW > 0 && pageH > 0 && picturePath && picturePath[0] && pics.begin(picturePath, pageW, pageH);
+  const bool picsOn = pageW > 0 && pageH > 0 && picturePath && picturePath[0] &&
+                      pics.begin(picturePath, pageW, pageH, appendAtoms);
   struct Ctx {
     AtomWriter* w;
     ZipArchive* zip;
@@ -438,11 +442,24 @@ bool EpubBook::open(const char* epubPath, const char* atomPath, ProgressFn progr
     return addZipImage(*x->zip, *x->pics, *ent);
   };
 
+  // A partial slice learns the TOC before inflating, then frees that document
+  // inside loadTocDoc. The whole-book path still loads it after the chapters so
+  // the NCX does not sit beside the deflate window on a long series.
+  bool tocLoaded = false;
+  if (!wholeBook) {
+    tocLoaded = loadTocDoc(opfDir);
+  }
+
   uint16_t htmlOk = 0;
   uint32_t atomStart = writer.position();
   unsigned long inflateMs = 0;
   unsigned long saxMs = 0;
-  for (uint16_t i = 0; i < nSpine; ++i) {
+  const uint16_t begin = spineBegin > nSpine ? nSpine : spineBegin;
+  const uint16_t end = (maxSpines == 0xFFFF || static_cast<uint32_t>(begin) + maxSpines > nSpine)
+                           ? nSpine
+                           : static_cast<uint16_t>(begin + maxSpines);
+  sliceEnd = begin;
+  for (uint16_t i = begin; i < end; ++i) {
     if (!writer.ok()) {
       break;
     }
@@ -461,14 +478,20 @@ bool EpubBook::open(const char* epubPath, const char* atomPath, ProgressFn progr
       a.kind = id != 0 ? AtomKind::Picture : AtomKind::PageBreak;
       a.cp = id;
       writer.write(a);
+      items[i].done = 1;
+      sliceEnd = static_cast<uint16_t>(i + 1);
       continue;
     }
     if (items[i].kind != Spine::kHtml) {
       LOG_INF("EPUB", "skip %s", ent ? ent->name : "?");
+      items[i].done = 1;
+      sliceEnd = static_cast<uint16_t>(i + 1);
       continue;
     }
     if (!ent) {
       LOG_ERR("EPUB", "spine missing %u", i);
+      items[i].done = 1;
+      sliceEnd = static_cast<uint16_t>(i + 1);
       continue;
     }
     dirnameOf(ctx.chapterDir, sizeof(ctx.chapterDir), ent->name);
@@ -483,6 +506,8 @@ bool EpubBook::open(const char* epubPath, const char* atomPath, ProgressFn progr
     bool onDisk = false;
     if (!openMember(zip, *ent, "/.crossjp/work.xhtml", xml, n, hf, onDisk)) {
       LOG_ERR("EPUB", "extract %s (%u bytes): %s", ent->name, static_cast<unsigned>(ent->uncompSize), zip.lastError());
+      items[i].done = 1;
+      sliceEnd = static_cast<uint16_t>(i + 1);
       continue;
     }
     if (!onDisk && xml && n > 0) {
@@ -519,6 +544,8 @@ bool EpubBook::open(const char* epubPath, const char* atomPath, ProgressFn progr
     }
     if (!parsed) {
       LOG_ERR("EPUB", "parse %s failed: %s", ent->name, zip.lastError());
+      items[i].done = 1;
+      sliceEnd = static_cast<uint16_t>(i + 1);
       continue;
     }
     LOG_INF("EPUB", "ch %u %s %uB chars=%u", i, ent->name, static_cast<unsigned>(ent->uncompSize),
@@ -534,6 +561,8 @@ bool EpubBook::open(const char* epubPath, const char* atomPath, ProgressFn progr
     if (!writer.ok()) {
       break;
     }
+    items[i].done = 1;
+    sliceEnd = static_cast<uint16_t>(i + 1);
     if (ctx.ch == 0) {
       continue;
     }
@@ -545,29 +574,40 @@ bool EpubBook::open(const char* epubPath, const char* atomPath, ProgressFn progr
     error = writer.diskFull() ? "disk full" : "atom write";
     const uint32_t at = writer.position();
     writer.close();
-    // A partial IRA6 has no chapter sidecar, so the next open would rebuild it.
-    // Drop it now. The last attempt left this file holding the free space.
-    if (atomPath && atomPath[0]) {
+    if (appendAtoms && atomKeep >= 4) {
+      HalFile torn = Storage.open(atomPath, O_RDWR);
+      if (torn) {
+        torn.truncate(atomKeep);
+        torn.close();
+      }
+    } else if (atomPath && atomPath[0]) {
+      // A failed first slice has no chapter sidecar. Drop it so it does not hold the free space.
       Storage.remove(atomPath);
     }
     LOG_ERR("EPUB", "%s at %lu", error, static_cast<unsigned long>(at));
     close();
     return false;
   }
-  // After the chapters, so the TOC document does not sit beside the inflate window.
-  if (!loadTocDoc(opfDir)) {
+  if (!tocLoaded && !loadTocDoc(opfDir)) {
     LOG_INF("EPUB", "No NCX/nav TOC");
   }
+  for (uint16_t i = begin; i < sliceEnd; ++i) {
+    items[i].done = 1;
+  }
   bindTocToSpine();
-  report(nSpine, nSpine);
+  report(sliceEnd, nSpine);
   const uint32_t atomBytes = writer.position() - atomStart;
   writer.close();
   const uint16_t nPic = pics.count();
   pics.end();
   error = "";
-  LOG_INF("EPUB", "'%s' spine=%u html=%u pics=%u atoms=%u infl %lums sax %lums total %lums", bookTitle, nSpine, htmlOk,
-          nPic, static_cast<unsigned>(atomBytes), inflateMs, saxMs, millis() - t0);
-  if ((htmlOk == 0 && nPic == 0) || (atomBytes < 64 && nPic == 0)) {
+  LOG_INF("EPUB", "'%s' spine=%u/%u html=%u pics=%u atoms=%u infl %lums sax %lums total %lums", bookTitle, sliceEnd,
+          nSpine, htmlOk, nPic, static_cast<unsigned>(atomBytes), inflateMs, saxMs, millis() - t0);
+  if (wholeBook && ((htmlOk == 0 && nPic == 0) || (atomBytes < 64 && nPic == 0))) {
+    error = "no html";
+    return false;
+  }
+  if (!wholeBook && sliceEnd == begin && begin < nSpine) {
     error = "no html";
     return false;
   }
@@ -869,6 +909,7 @@ void EpubBook::addToc(const char* title, const char* href) {
     }
   }
   e.atomOff = 0xFFFFFFFFu;
+  e.spine = 0xFFFFu;
   ++nToc;
 }
 
@@ -983,7 +1024,7 @@ void EpubBook::bindTocToSpine() {
   };
   if (nToc == 0) {
     for (uint16_t i = 0; i < nSpine; ++i) {
-      if (items[i].kind != Spine::kHtml) {
+      if (!items[i].done || items[i].kind != Spine::kHtml) {
         continue;
       }
       const char* name = spineName(i);
@@ -996,6 +1037,7 @@ void EpubBook::bindTocToSpine() {
       }
       if (nToc > 0) {
         tocs[nToc - 1].atomOff = items[i].atomOff;
+        tocs[nToc - 1].spine = i;
       }
     }
     LOG_INF("EPUB", "TOC from spine entries=%u", nToc);
@@ -1006,12 +1048,22 @@ void EpubBook::bindTocToSpine() {
       if (!hrefMatch(spineName(i), tocs[t].href)) {
         continue;
       }
+      tocs[t].spine = i;
+      if (!items[i].done) {
+        tocs[t].atomOff = 0xFFFFFFFFu;
+        break;
+      }
       // 角川/青空 style: TOC points at a title-only XHTML; body is the next file.
+      // Only walk spines this slice actually wrote. A later file still has chCount 0.
       uint16_t j = i;
-      while (j < nSpine && items[j].chCount < 32) {
+      while (j < nSpine && items[j].done && items[j].chCount < 32) {
         ++j;
       }
-      tocs[t].atomOff = (j < nSpine) ? items[j].atomOff : items[i].atomOff;
+      if (j >= nSpine || !items[j].done) {
+        j = i;
+      }
+      tocs[t].atomOff = items[j].atomOff;
+      tocs[t].spine = j;
       break;
     }
   }
