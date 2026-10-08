@@ -48,6 +48,7 @@ class TypesetBook {
   ts::PageLayouter layouter;
   ts::LayoutOptions layoutOpt{};
   std::vector<uint32_t> pageOffsets;
+  std::vector<uint8_t> pageModes;  // writing mode to begin() each page with
   std::vector<ts::ChapterInfo> chapters;
   struct ChapterMark {
     uint32_t atomOff = 0;

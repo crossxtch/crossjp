@@ -49,6 +49,9 @@ class XgfFont {
   // Blit one em (or ruby) slot at logical top-left. rotate90 is 90° CW, y-down.
   bool blit(Gfx& gfx, int x, int y, uint16_t bodyId, bool ruby, bool rotate90, Plane plane);
 
+  // Scale a body glyph into a size×size box. Used for 縦中横. Honors the gray plane.
+  bool blitBox(Gfx& gfx, int x, int y, uint16_t bodyId, int size, Plane plane);
+
   // 1-bit UI: Latin from Gfx fontId, other glyphs from this face, scaled to the
   // UI ascender. y matches Gfx::drawText. Stops before maxX (0 = no clip).
   int drawUtf8(Gfx& gfx, int fontId, int x, int y, const char* text, bool black, int maxX = 0);

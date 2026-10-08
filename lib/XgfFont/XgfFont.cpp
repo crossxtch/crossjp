@@ -551,6 +551,44 @@ bool XgfFont::blit(Gfx& gfx, const int x, const int y, const uint16_t bodyId, co
   return true;
 }
 
+bool XgfFont::blitBox(Gfx& gfx, const int x, const int y, const uint16_t bodyId, const int size, const Plane plane) {
+  if (size <= 0) {
+    return false;
+  }
+  const uint8_t* slot = cacheSlot(bodyId, false);
+  if (!slot) {
+    return false;
+  }
+  const uint8_t em = header.emPx;
+  if (em == 0) {
+    return false;
+  }
+  if (size == static_cast<int>(em)) {
+    return blit(gfx, x, y, bodyId, false, false, plane);
+  }
+  for (int dy = 0; dy < size; ++dy) {
+    const int y0 = dy * static_cast<int>(em) / size;
+    const int y1 = (dy + 1) * static_cast<int>(em) / size;
+    for (int dx = 0; dx < size; ++dx) {
+      const int x0 = dx * static_cast<int>(em) / size;
+      const int x1 = (dx + 1) * static_cast<int>(em) / size;
+      bool ink = false;
+      for (int sy = y0; sy < y1 && !ink; ++sy) {
+        for (int sx = x0; sx < x1; ++sx) {
+          if (planeKeep(pixelAt(slot, em, sx, sy), plane)) {
+            ink = true;
+            break;
+          }
+        }
+      }
+      if (ink) {
+        gfx.drawPixel(x + dx, y + dy, true);
+      }
+    }
+  }
+  return true;
+}
+
 bool XgfFont::blitUi(Gfx& gfx, const int x, const int y, const uint16_t bodyId, const int size, const bool black) {
   if (size <= 0) {
     return false;

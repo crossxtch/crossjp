@@ -82,6 +82,226 @@ int main() {
 
   std::printf("ok pages=%d glyphs=%u\n", pages, lay.pageGlyphCount());
 
+  auto dump = [](const ts::PageLayouter& l) {
+    for (uint16_t i = 0; i < l.pageGlyphCount(); ++i) {
+      const ts::GlyphRun& g = l.page()[i];
+      std::fprintf(stderr, "  [%u] U+%04X x=%d y=%d adv=%u flags=%u ruby=%u\n", i, g.cp, g.x, g.y, g.advance, g.flags,
+                   g.rubyCount);
+    }
+  };
+  auto must = [](ts::PageLayouter& l, const ts::Atom& a) {
+    if (l.feed(a, 1)) {
+      fail("unexpected page break");
+    }
+  };
+  auto ch = [](uint32_t cp) {
+    ts::Atom a{};
+    a.kind = ts::AtomKind::Ch;
+    a.cp = cp;
+    return a;
+  };
+
+  // Vertical gap must not open a hole between あ and い.
+  lay.begin(opt);
+  must(lay, ch(0x3042));
+  {
+    ts::Atom gap{};
+    gap.kind = ts::AtomKind::Gap;
+    must(lay, gap);
+  }
+  must(lay, ch(0x3044));
+  if (!lay.finish() || lay.pageGlyphCount() != 2) {
+    dump(lay);
+    fail("vertical gap glyph count");
+  }
+  if (lay.page()[0].x != lay.page()[1].x || lay.page()[1].y != lay.page()[0].y + opt.em) {
+    dump(lay);
+    fail("vertical gap separated あ and い");
+  }
+
+  // em=10, 10 chars per column, 2 columns. Half-em 。、 can hang in the pad.
+  ts::LayoutOptions grid = opt;
+  grid.width = 40;
+  grid.height = 100;
+  grid.em = 10;
+  lay.begin(grid);
+  must(lay, ch(0x3002));
+  if (!lay.finish()) {
+    fail("half advance page");
+  }
+  if (lay.page()[0].advance != 5 || (lay.page()[0].flags & ts::kRunHalfCell) == 0) {
+    dump(lay);
+    fail("。 advance");
+  }
+  lay.begin(grid);
+  must(lay, ch(0x30FB));
+  lay.finish();
+  if (lay.page()[0].advance != 5 || (lay.page()[0].flags & ts::kRunHalfCell) == 0) {
+    dump(lay);
+    fail("・ advance");
+  }
+  lay.begin(grid);
+  must(lay, ch(0x300C));
+  lay.finish();
+  if (lay.page()[0].advance != 10 || (lay.page()[0].flags & ts::kRunHalfCell) != 0) {
+    dump(lay);
+    fail("「 stays a full em");
+  }
+
+  const int col0 = lay.page()[0].x;
+  const int top = lay.page()[0].y;
+  const int col1 = col0 - 15;
+
+  lay.begin(grid);
+  for (int i = 0; i < 10; ++i) {
+    must(lay, ch(0x3042));
+  }
+  must(lay, ch(0x3002));
+  must(lay, ch(0x3044));
+  if (!lay.finish()) {
+    fail("hang page");
+  }
+  const ts::GlyphRun* period = nullptr;
+  const ts::GlyphRun* nextCh = nullptr;
+  for (uint16_t i = 0; i < lay.pageGlyphCount(); ++i) {
+    if (lay.page()[i].cp == 0x3002) {
+      period = &lay.page()[i];
+    }
+    if (lay.page()[i].cp == 0x3044) {
+      nextCh = &lay.page()[i];
+    }
+  }
+  if (!period || period->x != col0 || period->y != top + 100 || !nextCh || nextCh->x != col1 || nextCh->y != top) {
+    dump(lay);
+    fail("。 hang did not close the column");
+  }
+
+  lay.begin(grid);
+  for (int i = 0; i < 10; ++i) {
+    must(lay, ch(0x3042));
+  }
+  must(lay, ch(0x3002));
+  must(lay, ch(0x3002));
+  lay.finish();
+  int periods = 0;
+  bool secondAtTop = false;
+  for (uint16_t i = 0; i < lay.pageGlyphCount(); ++i) {
+    if (lay.page()[i].cp != 0x3002) {
+      continue;
+    }
+    ++periods;
+    if (lay.page()[i].x == col1 && lay.page()[i].y == top) {
+      secondAtTop = true;
+    }
+  }
+  if (periods != 2 || !secondAtTop) {
+    dump(lay);
+    fail("second 。 should start the next column");
+  }
+
+  lay.begin(grid);
+  for (int i = 0; i < 9; ++i) {
+    must(lay, ch(0x3042));
+  }
+  must(lay, ch(0x300C));
+  must(lay, ch(0x3044));
+  lay.finish();
+  const ts::GlyphRun* bracket = nullptr;
+  nextCh = nullptr;
+  for (uint16_t i = 0; i < lay.pageGlyphCount(); ++i) {
+    if (lay.page()[i].cp == 0x300C) {
+      bracket = &lay.page()[i];
+    }
+    if (lay.page()[i].cp == 0x3044) {
+      nextCh = &lay.page()[i];
+    }
+  }
+  if (!bracket || !nextCh || bracket->x != col1 || bracket->y != top || nextCh->x != col1 || nextCh->y != top + 10) {
+    dump(lay);
+    fail("「 should be pulled with the next char");
+  }
+
+  lay.begin(grid);
+  for (int i = 0; i < 9; ++i) {
+    must(lay, ch(0x3042));
+  }
+  {
+    ts::Atom g{};
+    g.kind = ts::AtomKind::Group;
+    g.cp = 0x9580;
+    g.tcyCount = 2;
+    g.tcy[0] = 0x9580;
+    g.tcy[1] = 0x8107;
+    g.rubyCount = 4;
+    g.ruby[0] = 0x304B;
+    g.ruby[1] = 0x3069;
+    g.ruby[2] = 0x308F;
+    g.ruby[3] = 0x304D;
+    must(lay, g);
+  }
+  lay.finish();
+  const ts::GlyphRun* base0 = nullptr;
+  const ts::GlyphRun* base1 = nullptr;
+  for (uint16_t i = 0; i < lay.pageGlyphCount(); ++i) {
+    if (lay.page()[i].cp == 0x9580) {
+      base0 = &lay.page()[i];
+    }
+    if (lay.page()[i].cp == 0x8107) {
+      base1 = &lay.page()[i];
+    }
+  }
+  if (!base0 || !base1 || base0->x != col1 || base1->x != col1 || base0->y != top || base1->y != top + 10 ||
+      base0->rubyCount != 4 || (base1->flags & ts::kRunSticky) == 0) {
+    dump(lay);
+    fail("group ruby split across a column");
+  }
+
+  ts::LayoutOptions horiz = grid;
+  horiz.mode = ts::WritingMode::HorizontalTb;
+  horiz.width = 100;
+  horiz.height = 40;
+  lay.begin(horiz);
+  for (int i = 0; i < 9; ++i) {
+    must(lay, ch(0x3042));
+  }
+  must(lay, ch(0x300C));
+  must(lay, ch(0x3044));
+  lay.finish();
+  bracket = nullptr;
+  nextCh = nullptr;
+  const ts::GlyphRun* first = lay.pageGlyphCount() ? &lay.page()[0] : nullptr;
+  for (uint16_t i = 0; i < lay.pageGlyphCount(); ++i) {
+    if (lay.page()[i].cp == 0x300C) {
+      bracket = &lay.page()[i];
+    }
+    if (lay.page()[i].cp == 0x3044) {
+      nextCh = &lay.page()[i];
+    }
+  }
+  if (!first || !bracket || !nextCh || bracket->y == first->y || bracket->x != first->x || nextCh->y != bracket->y ||
+      nextCh->x != bracket->x + 10 || (bracket->flags & ts::kRunRubyAbove) == 0) {
+    dump(lay);
+    fail("horizontal 「 should wrap with the next char");
+  }
+
+  lay.begin(opt);
+  must(lay, ch(0x3042));
+  {
+    ts::Atom mode{};
+    mode.kind = ts::AtomKind::Mode;
+    mode.cp = 1;
+    if (!lay.feed(mode, 1)) {
+      fail("mode change should close the page");
+    }
+  }
+  lay.clearPage();
+  must(lay, ch(0x3044));
+  lay.finish();
+  if (lay.pageGlyphCount() != 1 || (lay.page()[0].flags & ts::kRunRubyAbove) == 0) {
+    dump(lay);
+    fail("mode atom did not switch to horizontal");
+  }
+
   auto expectRuby = [](const ts::RubyAlong& got, int start, int pitch, const char* name) {
     if (got.start != start || got.pitch != pitch) {
       std::fprintf(stderr, "FAIL %s start=%d pitch=%d (want %d %d)\n", name, got.start, got.pitch, start, pitch);

@@ -135,6 +135,71 @@ int main() {
       fail("気 split across text chunk");
     }
   }
-  std::printf("ok htmlir %s\n", "ruby/tcy/gaiji");
+  {
+    auto a = parse("<p><ruby>門脇<rt>かどわき</rt></ruby></p>");
+    if (a.size() != 1 || a[0].kind != AtomKind::Group || a[0].tcyCount != 2 || a[0].tcy[0] != 0x9580 ||
+        a[0].tcy[1] != 0x8107 || a[0].rubyCount != 4 || a[0].ruby[0] != 0x304B || a[0].ruby[1] != 0x3069 ||
+        a[0].ruby[2] != 0x308F || a[0].ruby[3] != 0x304D) {
+      fail("group ruby 門脇");
+    }
+  }
+  {
+    auto a = parse("<p><em>強調</em></p>");
+    if (a.size() != 2 || a[0].cp != 0x5F37 || a[1].cp != 0x8ABF || a[0].emphasis != 1 || a[1].emphasis != 1) {
+      fail("em sesame");
+    }
+  }
+  {
+    auto a = parse("<p><span class=\"em-line\">線</span></p>");
+    if (a.size() != 1 || a[0].emphasis != 2) {
+      fail("em line");
+    }
+  }
+  {
+    auto a = parse("<p><img src=\"a.jpg\"/></p>");
+    if (!a.empty()) {
+      fail("img without alt became a page");
+    }
+  }
+  {
+    auto a = parse("<p><img alt=\"図\"/></p>");
+    if (a.size() != 1 || a[0].kind != AtomKind::Ch || a[0].cp != 0x56F3) {
+      fail("img alt");
+    }
+  }
+  {
+    auto a = parse("<p><img class=\"gaiji\" src=\"gaiji-cid13803.png\" alt=\"〓\"/></p>");
+    if (a.size() != 1 || a[0].cp != 0x20B9F) {
+      fail("gaiji cid");
+    }
+  }
+  {
+    auto a = parse("<h1>題</h1><p>文</p>");
+    if (a.size() != 3 || a[0].cp != 0x984C || a[1].kind != AtomKind::ColumnBreak || a[2].cp != 0x6587) {
+      std::fprintf(stderr, "heading atoms %zu\n", a.size());
+      for (auto& x : a) {
+        std::fprintf(stderr, "  kind=%u cp=%04x\n", static_cast<unsigned>(x.kind), x.cp);
+      }
+      fail("heading column");
+    }
+  }
+  {
+    ts::WritingMode mode = ts::WritingMode::VerticalRl;
+    const char* html = "<html class=\"hltr\"><body><p>あ</p></body></html>";
+    if (!ts::sniffWritingMode(html, std::strlen(html), mode) || mode != ts::WritingMode::HorizontalTb) {
+      fail("sniff hltr");
+    }
+    mode = ts::WritingMode::HorizontalTb;
+    html = "<html><body class=\"vrtl\"><p>あ</p></body></html>";
+    if (!ts::sniffWritingMode(html, std::strlen(html), mode) || mode != ts::WritingMode::VerticalRl) {
+      fail("sniff vrtl");
+    }
+    mode = ts::WritingMode::VerticalRl;
+    html = "<html><head><style>.calibre{writing-mode:horizontal-tb}</style></head><body><p>あ</p></body></html>";
+    if (!ts::sniffWritingMode(html, std::strlen(html), mode) || mode != ts::WritingMode::HorizontalTb) {
+      fail("sniff css");
+    }
+  }
+  std::printf("ok htmlir %s\n", "ruby/tcy/gaiji/group/em/img/heading");
   return 0;
 }

@@ -44,6 +44,22 @@ bool kinsokuCanEndColumn(const uint32_t cp) {
   return !containsSorted(kNotEnd, sizeof(kNotEnd) / sizeof(kNotEnd[0]), cp);
 }
 
+bool kinsokuHangs(const uint32_t cp) {
+  return cp == 0x3001 || cp == 0x3002 || cp == 0xFF0C || cp == 0xFF0E;
+}
+
+bool kinsokuHalfAdvance(const uint32_t cp) {
+  return kinsokuHangs(cp) || cp == 0x30FB || cp == 0xFF1A;
+}
+
+int16_t kinsokuInlineAdvance(const uint32_t cp, const int16_t em, const bool tcy) {
+  if (tcy || em <= 1 || !kinsokuHalfAdvance(cp)) {
+    return em;
+  }
+  const int16_t half = static_cast<int16_t>(em / 2);
+  return half < 1 ? static_cast<int16_t>(1) : half;
+}
+
 bool shouldRotate(const uint32_t v) {
   if (v >= 0x30 && v <= 0x39) {
     return false;

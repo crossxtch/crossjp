@@ -8,6 +8,9 @@
 
 namespace ts {
 
+// IRA5. A file without this header is an older ingest and must be rebuilt.
+constexpr uint32_t kAtomMagic = 0x35415249u;
+
 class AtomWriter {
  public:
   bool open(const char* path);

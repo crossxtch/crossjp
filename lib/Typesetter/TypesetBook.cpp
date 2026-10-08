@@ -168,6 +168,7 @@ void TypesetBook::close() {
   atoms.close();
   font.close();
   pageOffsets.clear();
+  pageModes.clear();
   chapters.clear();
   chapterMarks.clear();
   sourceSize = 0;
@@ -332,6 +333,13 @@ bool TypesetBook::atomCacheFresh() const {
   if (sourceSize == 0) {
     return false;
   }
+  {
+    HalFile atom;
+    uint32_t magic = 0;
+    if (!Storage.openFileForRead("TS", atomPath, atom) || atom.read(&magic, 4) != 4 || magic != ts::kAtomMagic) {
+      return false;  // pre-IRA5 ingest; layout rules changed
+    }
+  }
   // Broken ingest after cache-clear wrote only page-breaks (~1 byte each).
   if (endsWithI(filepath, ".epub") && sourceSize < 2048) {
     return false;
@@ -348,7 +356,7 @@ bool TypesetBook::atomCacheFresh() const {
   if (idx.read(&magic, 4) != 4) {
     return true;
   }
-  if (magic == 0x34444954u /* TID4 */) {
+  if (magic == 0x35444954u /* TID5 */) {
     if (idx.read(&atomSz, 4) != 4 || atomSz != sourceSize) {
       return false;
     }
@@ -374,7 +382,7 @@ bool TypesetBook::loadIndex() {
   uint16_t h = 0;
   uint16_t mode = 0;
   uint32_t count = 0;
-  if (idx.read(&magic, 4) != 4 || magic != 0x34444954u /* TID4 */ || idx.read(&atomSz, 4) != 4 ||
+  if (idx.read(&magic, 4) != 4 || magic != 0x35444954u /* TID5 */ || idx.read(&atomSz, 4) != 4 ||
       atomSz != sourceSize || idx.read(&srcSz, 4) != 4 || srcSz != bookSrcSize || idx.read(&em, 2) != 2 ||
       em != layoutOpt.em || idx.read(&w, 2) != 2 || w != static_cast<uint16_t>(layoutOpt.width) ||
       idx.read(&h, 2) != 2 || h != static_cast<uint16_t>(layoutOpt.height) || idx.read(&mode, 2) != 2 ||
@@ -383,9 +391,12 @@ bool TypesetBook::loadIndex() {
   }
   layoutOpt.mode = static_cast<ts::WritingMode>(mode);
   pageOffsets.resize(count);
+  pageModes.resize(count);
   const size_t bytes = count * 4;
-  if (idx.read(pageOffsets.data(), bytes) != static_cast<int>(bytes)) {
+  if (idx.read(pageOffsets.data(), bytes) != static_cast<int>(bytes) ||
+      idx.read(pageModes.data(), count) != static_cast<int>(count)) {
     pageOffsets.clear();
+    pageModes.clear();
     return false;
   }
   LOG_INF("TS", "Index %s (%u pages)", p, static_cast<unsigned>(count));
@@ -400,7 +411,7 @@ bool TypesetBook::saveIndex() const {
   if (!Storage.openFileForWrite("TS", p, idx)) {
     return false;
   }
-  const uint32_t magic = 0x34444954u;
+  const uint32_t magic = 0x35444954u;  // TID5
   const uint32_t atomSz = sourceSize;
   const uint32_t srcSz = bookSrcSize;
   const uint16_t em = layoutOpt.em;
@@ -417,21 +428,33 @@ bool TypesetBook::saveIndex() const {
   idx.write(&mode, 2);
   idx.write(&count, 4);
   idx.write(pageOffsets.data(), count * 4);
+  for (uint32_t i = 0; i < count; ++i) {
+    const uint8_t m = i < pageModes.size() ? pageModes[i] : static_cast<uint8_t>(layoutOpt.mode);
+    idx.write(&m, 1);
+  }
   return true;
 }
 
 bool TypesetBook::buildIndex() {
   pageOffsets.clear();
-  pageOffsets.push_back(0);
-  atoms.seek(0);
+  pageModes.clear();
+  // Byte 0 is the IRA5 header. The first page replays from the first atom.
+  const ts::WritingMode bookMode = layoutOpt.mode;
+  pageOffsets.push_back(4);
+  pageModes.push_back(static_cast<uint8_t>(bookMode));
+  atoms.seek(4);
   layouter.begin(layoutOpt);
   ts::Atom atom{};
   bool pendingStart = false;
+  ts::WritingMode cur = bookMode;
   while (true) {
     const uint32_t atomPos = atoms.position();
     if (!atoms.next(atom)) {
       break;
     }
+    const bool isMode = atom.kind == ts::AtomKind::Mode;
+    const ts::WritingMode nextMode =
+        isMode ? (atom.cp == 1 ? ts::WritingMode::HorizontalTb : ts::WritingMode::VerticalRl) : cur;
     const bool complete = layouter.feed(atom, atomPos);
     if (pendingStart && layouter.currentGlyphCount() > 0) {
       if (pageOffsets.size() >= 65535) {
@@ -439,7 +462,11 @@ bool TypesetBook::buildIndex() {
         return false;
       }
       pageOffsets.push_back(layouter.currentPagePos());
+      pageModes.push_back(static_cast<uint8_t>(cur));
       pendingStart = false;
+    }
+    if (isMode) {
+      cur = nextMode;
     }
     if (complete) {
       layouter.clearPage();
@@ -449,6 +476,7 @@ bool TypesetBook::buildIndex() {
           return false;
         }
         pageOffsets.push_back(layouter.currentPagePos());
+        pageModes.push_back(static_cast<uint8_t>(cur));
       } else {
         pendingStart = true;
       }
@@ -469,7 +497,11 @@ bool TypesetBook::layoutPage(const uint32_t pageIndex) {
   }
   const unsigned long tLay = millis();
   atoms.seek(pageOffsets[pageIndex]);
-  layouter.begin(layoutOpt);
+  ts::LayoutOptions pageOpt = layoutOpt;
+  if (pageIndex < pageModes.size()) {
+    pageOpt.mode = static_cast<ts::WritingMode>(pageModes[pageIndex]);
+  }
+  layouter.begin(pageOpt);
   ts::Atom atom{};
   bool complete = false;
   while (true) {
@@ -531,32 +563,127 @@ uint32_t fallbackCp(const uint32_t cp) {
 
 void TypesetBook::paint(Gfx& gfx, const XgfFont::Plane plane) {
   gfx.clear(false);
-  const uint8_t em = font.emPx();
-  const uint8_t rubyEm = font.rubyEmPx();
+  const int em = font.emPx();
+  const int rubyEm = font.rubyEmPx();
 
   for (uint16_t i = 0; i < loadedCount; ++i) {
     const ts::GlyphRun& g = loadedGlyphs[i];
-    uint16_t id = font.glyphId(g.cp);
-    if (id == 0xFFFF) {
-      id = font.glyphId(fallbackCp(g.cp));
+    const bool vert = !ts::runRubyAbove(g);
+    const int adv = ts::runAdvance(g);
+    const bool tcyRun = ts::runTcy(g) && g.rubyCount > 1;
+
+    if (tcyRun) {
+      const int n = g.rubyCount;
+      int size = em / n;
+      if (size < 1) {
+        size = 1;
+      }
+      const int y0 = g.y + (em - size) / 2;
+      const int x0 = g.x + (em - size * n) / 2;
+      for (int r = 0; r < n; ++r) {
+        uint16_t id = font.glyphId(g.ruby[r]);
+        if (id == 0xFFFF) {
+          id = font.glyphId(fallbackCp(g.ruby[r]));
+        }
+        if (id != 0xFFFF) {
+          font.blitBox(gfx, x0 + r * size, y0, id, size, plane);
+        }
+      }
+    } else {
+      int drawX = g.x;
+      int drawY = g.y;
+      if ((g.flags & ts::kRunHalfCell) != 0 && g.advance > 0 && g.advance < g.size) {
+        const int shift = (static_cast<int>(g.size) - static_cast<int>(g.advance)) / 2;
+        if (vert) {
+          drawY -= shift;
+        } else {
+          drawX -= shift;
+        }
+      }
+      uint16_t id = font.glyphId(g.cp);
+      if (id == 0xFFFF) {
+        id = font.glyphId(fallbackCp(g.cp));
+      }
+      if (id != 0xFFFF) {
+        font.blit(gfx, drawX, drawY, id, false, ts::runRotate90(g), plane);
+      }
     }
-    if (id != 0xFFFF) {
-      font.blit(gfx, g.x, g.y, id, false, ts::runRotate90(g), plane);
+
+    if (g.emphasis != 0 && em > 0) {
+      const bool hasRuby = !ts::runTcy(g) && g.rubyCount > 0;
+      int gap = em / (hasRuby ? 10 : 4);
+      if (gap < 1) {
+        gap = 1;
+      }
+      if (g.emphasis == 2) {
+        int thick = em / 14;
+        if (thick < 1) {
+          thick = 1;
+        }
+        if (vert) {
+          gfx.fillRect(g.x + em + gap, g.y, thick, adv, true);
+        } else {
+          gfx.fillRect(g.x, g.y - gap - thick, adv, thick, true);
+        }
+      } else {
+        int rad = em / 10;
+        if (rad < 1) {
+          rad = 1;
+        }
+        const int cx = vert ? g.x + em + gap : g.x + adv / 2;
+        const int cy = vert ? g.y + adv / 2 : g.y - gap;
+        const int r2 = rad * rad;
+        for (int dy = -rad; dy <= rad; ++dy) {
+          for (int dx = -rad; dx <= rad; ++dx) {
+            if (dx * dx + dy * dy <= r2) {
+              gfx.drawPixel(cx + dx, cy + dy, true);
+            }
+          }
+        }
+      }
     }
-    if (g.rubyCount == 0 || rubyEm == 0) {
+
+    if (tcyRun || g.rubyCount == 0 || rubyEm == 0) {
       continue;
     }
-    const bool vert = !ts::runRubyAbove(g);
-    const int16_t origin = vert ? g.y : g.x;
-    const int16_t cell = g.size > 0 ? static_cast<int16_t>(g.size) : static_cast<int16_t>(em);
+
+    const int lead = g.rubyLead;
+    const int origin = (vert ? g.y : g.x) - lead;
+    int lastEnd = (vert ? g.y : g.x) + adv;
+    for (uint16_t j = static_cast<uint16_t>(i + 1); j < loadedCount; ++j) {
+      const ts::GlyphRun& o = loadedGlyphs[j];
+      if (!ts::runSticky(o)) {
+        break;
+      }
+      if (vert) {
+        if (o.x != g.x) {
+          break;
+        }
+      } else if (o.y != g.y) {
+        break;
+      }
+      lastEnd = (vert ? o.y : o.x) + ts::runAdvance(o);
+    }
+    const int span = lastEnd - origin + lead;
+    if (span <= 0) {
+      continue;
+    }
+    const int clusterLo = origin;
+    const int clusterHi = origin + span;
+    auto inside = [&](const ts::GlyphRun& o) -> bool {
+      if (vert) {
+        return o.x == g.x && o.y >= clusterLo && o.y < clusterHi;
+      }
+      return o.y == g.y && o.x >= clusterLo && o.x < clusterHi;
+    };
     auto blocks = [&](const int dir) -> bool {
       const ts::GlyphRun* best = nullptr;
       int bestAbs = 0;
       for (uint16_t j = 0; j < loadedCount; ++j) {
-        if (j == i) {
+        const ts::GlyphRun& o = loadedGlyphs[j];
+        if (inside(o)) {
           continue;
         }
-        const ts::GlyphRun& o = loadedGlyphs[j];
         if (vert) {
           if (o.x != g.x) {
             continue;
@@ -574,18 +701,22 @@ void TypesetBook::paint(Gfx& gfx, const XgfFont::Plane plane) {
           bestAbs = ad;
         }
       }
-      return best && best->rubyCount > 0 && bestAbs <= cell;
+      return best && best->rubyCount > 0 && bestAbs <= span;
     };
-    const ts::RubyAlong along =
-        ts::placeRubyAlong(origin, cell, static_cast<int16_t>(rubyEm), g.rubyCount, !blocks(-1), !blocks(1));
+    const ts::RubyAlong along = ts::placeRubyAlong(static_cast<int16_t>(origin), static_cast<int16_t>(span),
+                                                   static_cast<int16_t>(rubyEm), g.rubyCount, !blocks(-1), !blocks(1));
+    const int beside = g.emphasis ? em * 28 / 100 : 0;
     for (uint8_t r = 0; r < g.rubyCount; ++r) {
-      const uint16_t rid = font.glyphId(g.ruby[r]);
+      uint16_t rid = font.glyphId(g.ruby[r]);
+      if (rid == 0xFFFF) {
+        rid = font.glyphId(fallbackCp(g.ruby[r]));
+      }
       if (rid == 0xFFFF) {
         continue;
       }
       const int at = along.start + r * along.pitch;
-      const int rx = vert ? g.x + em : at;
-      const int ry = vert ? at : g.y - rubyEm;
+      const int rx = vert ? g.x + em + beside : at;
+      const int ry = vert ? at : g.y - rubyEm - beside;
       font.blit(gfx, rx, ry, rid, true, false, plane);
     }
   }

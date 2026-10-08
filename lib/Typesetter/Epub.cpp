@@ -180,7 +180,7 @@ bool EpubBook::open(const char* epubPath, const char* atomPath, ProgressFn progr
   sink.ctx = &ctx;
   sink.emit = [](void* c, const Atom& a, uint32_t) -> bool {
     auto* x = static_cast<Ctx*>(c);
-    if (a.kind == AtomKind::Ch || a.kind == AtomKind::Tcy) {
+    if (a.kind == AtomKind::Ch || a.kind == AtomKind::Tcy || a.kind == AtomKind::Group) {
       if (x->ch < 0xFFFFu) {
         ++x->ch;
       }
@@ -228,10 +228,22 @@ bool EpubBook::open(const char* epubPath, const char* atomPath, ProgressFn progr
     HtmlIRResult ir{};
     const unsigned long tInf = millis();
     bool parsed = false;
+    WritingMode chapterMode = mode;
+    bool sniffed = false;
     size_t n = 0;
     uint8_t* xml = zip.extract(*ent, &n);
     if (xml && n > 0) {
       inflateMs += millis() - tInf;
+      WritingMode found = mode;
+      sniffed = sniffWritingMode(reinterpret_cast<char*>(xml), n, found);
+      if (sniffed) {
+        chapterMode = found;
+      }
+      items[i].atomOff = writer.position();
+      Atom modeAtom{};
+      modeAtom.kind = AtomKind::Mode;
+      modeAtom.cp = chapterMode == WritingMode::HorizontalTb ? 1u : 0u;
+      writer.write(modeAtom);
       const unsigned long tSax = millis();
       htmlToAtoms(reinterpret_cast<char*>(xml), n, sink, &ir);
       saxMs += millis() - tSax;
@@ -252,6 +264,24 @@ bool EpubBook::open(const char* epubPath, const char* atomPath, ProgressFn progr
         continue;
       }
       hf.probeContiguous();
+      char* sniffBuf = static_cast<char*>(malloc(4096));
+      if (sniffBuf) {
+        const int got = hf.read(sniffBuf, 4096);
+        if (got > 0) {
+          WritingMode found = mode;
+          sniffed = sniffWritingMode(sniffBuf, static_cast<size_t>(got), found);
+          if (sniffed) {
+            chapterMode = found;
+          }
+        }
+        free(sniffBuf);
+      }
+      hf.seekSet(0);
+      items[i].atomOff = writer.position();
+      Atom modeAtom{};
+      modeAtom.kind = AtomKind::Mode;
+      modeAtom.cp = chapterMode == WritingMode::HorizontalTb ? 1u : 0u;
+      writer.write(modeAtom);
       auto readHf = [](void* ctx, char* dst, int max) -> int {
         return static_cast<HalFile*>(ctx)->read(dst, static_cast<size_t>(max));
       };
@@ -271,8 +301,8 @@ bool EpubBook::open(const char* epubPath, const char* atomPath, ProgressFn progr
       snprintf(items[i].title, sizeof(items[i].title), "%s", ir.title);
     }
     items[i].compact = ir.compactColumns ? 1 : 0;
-    items[i].hasMode = ir.hasMode ? 1 : 0;
-    items[i].mode = ir.mode;
+    items[i].hasMode = (sniffed || ir.hasMode) ? 1 : 0;
+    items[i].mode = chapterMode;
     items[i].chCount = ctx.ch;
     if (!ctx.ok) {
       error = "atom write";
