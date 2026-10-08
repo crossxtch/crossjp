@@ -2,7 +2,7 @@
 """Rasterize Jōyō kanji + kana + extra UI CJK into a 1-bit EpdFont.
 
 Matches Ubuntu 12: 12 pt at 150 DPI (~25 px). Latin is left to Ubuntu.
-Extra ideographs are taken from on-device UI strings (Chinese copy).
+Extra ideographs are taken from the Japanese UI strings.
 
 Example:
     .venv/bin/python tools/gen_ui_jp_font.py \\

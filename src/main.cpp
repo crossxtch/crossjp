@@ -109,7 +109,6 @@ void setup() {
 
   HalSystem::checkPanic();
   settings.load();
-  uiText::apply();
   ReadingFont::migrate();
   wifiCredentials.load();
   Frontlight.begin(0, 0, false);
@@ -148,12 +147,6 @@ void setup() {
 
   if (recoveryFirmware) {
     screenManager.goToFirmwareUpdate(true);
-    return;
-  }
-
-  if (!settings.languageChosen()) {
-    LOG_INF("MAIN", "Language not chosen");
-    screenManager.goToLanguageSetup();
     return;
   }
 

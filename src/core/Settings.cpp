@@ -38,7 +38,7 @@ void Settings::load() {
     loaded.fontFile[0] = '\0';
   }
   if (loaded.version < 9) {
-    loaded.language = kLanguageUnset;
+    loaded.reservedLanguage = 0;
   }
   loaded.version = VERSION;
   *this = loaded;
@@ -55,13 +55,10 @@ void Settings::load() {
   if (clockUtcOffsetQ > 104) {
     clockUtcOffsetQ = 48;
   }
-  if (language != kLanguageUnset && language > kLanguageChinese) {
-    language = kLanguageUnset;
-  }
   LOG_INF("SET",
-          "Loaded gyroOff=%u sec sleep=%u refresh=%u night=%u tilt=%u clock=%u tzq=%u lang=%u font='%s' last='%s'",
+          "Loaded gyroOff=%u sec sleep=%u refresh=%u night=%u tilt=%u clock=%u tzq=%u font='%s' last='%s'",
           gyroAutoOffSeconds, trueSleepMinutes, refreshEveryNPages, nightMode, tiltPageTurn, clockHasBeenSynced,
-          clockUtcOffsetQ, language, fontFile, lastBookPath);
+          clockUtcOffsetQ, fontFile, lastBookPath);
 }
 
 void Settings::save() const {
@@ -76,8 +73,8 @@ void Settings::save() const {
     LOG_ERR("SET", "Short settings write (%u of %u)", static_cast<unsigned>(n), static_cast<unsigned>(sizeof(*this)));
     return;
   }
-  LOG_DBG("SET", "Saved gyroOff=%u sleep=%u refresh=%u night=%u tilt=%u lang=%u last='%s'", gyroAutoOffSeconds,
-          trueSleepMinutes, refreshEveryNPages, nightMode, tiltPageTurn, language, lastBookPath);
+  LOG_DBG("SET", "Saved gyroOff=%u sleep=%u refresh=%u night=%u tilt=%u last='%s'", gyroAutoOffSeconds,
+          trueSleepMinutes, refreshEveryNPages, nightMode, tiltPageTurn, lastBookPath);
 }
 
 namespace {

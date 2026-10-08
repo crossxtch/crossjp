@@ -30,7 +30,6 @@ class ScreenManager {
   // from a screen pushed two levels deep) without them ever resuming.
   void pop(int levels = 1);
   void goHome();
-  void goToLanguageSetup();
   bool goToReader(const char* path);
   bool goToBrowser();
   bool goToSettings();
