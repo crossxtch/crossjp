@@ -1,4 +1,4 @@
-#include "BrowserScreen.h"
+#include "screens/BrowserScreen.h"
 
 #include <EpdFontFamily.h>
 #include <Gfx.h>

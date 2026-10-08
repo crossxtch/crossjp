@@ -69,7 +69,7 @@ void HalTiltSensor::update(const uint8_t mode, const uint8_t orientation, const 
 
   // Only sample in the reader. Leaving the IMU awake on home/settings
   // is a milliamps-level drain with no gesture to report.
-  const bool wantAwake = (mode != CrossPointTiltPageTurn::TILT_OFF) && inReader;
+  const bool wantAwake = (mode != TiltPageTurn::TILT_OFF) && inReader;
   if (wantAwake && !_isAwake) {
     _isAwake = wake();
     return;
@@ -102,17 +102,17 @@ void HalTiltSensor::update(const uint8_t mode, const uint8_t orientation, const 
   // On the X3 PCB: X axis = left/right in portrait, Y axis = left/right in landscape.
   float tiltAxis;
   switch (orientation) {
-    case CrossPointOrientation::PORTRAIT:
-      tiltAxis = mode == CrossPointTiltPageTurn::TILT_INVERTED ? -gx : gx;
+    case PanelOrientation::PORTRAIT:
+      tiltAxis = mode == TiltPageTurn::TILT_INVERTED ? -gx : gx;
       break;
-    case CrossPointOrientation::INVERTED:
-      tiltAxis = mode == CrossPointTiltPageTurn::TILT_INVERTED ? gx : -gx;
+    case PanelOrientation::INVERTED:
+      tiltAxis = mode == TiltPageTurn::TILT_INVERTED ? gx : -gx;
       break;
-    case CrossPointOrientation::LANDSCAPE_CW:
-      tiltAxis = mode == CrossPointTiltPageTurn::TILT_INVERTED ? gy : -gy;
+    case PanelOrientation::LANDSCAPE_CW:
+      tiltAxis = mode == TiltPageTurn::TILT_INVERTED ? gy : -gy;
       break;
-    case CrossPointOrientation::LANDSCAPE_CCW:
-      tiltAxis = mode == CrossPointTiltPageTurn::TILT_INVERTED ? -gy : gy;
+    case PanelOrientation::LANDSCAPE_CCW:
+      tiltAxis = mode == TiltPageTurn::TILT_INVERTED ? -gy : gy;
       break;
     default:
       tiltAxis = gx;

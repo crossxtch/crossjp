@@ -1,4 +1,4 @@
-#include "SettingsScreen.h"
+#include "screens/SettingsScreen.h"
 
 #include <Gfx.h>
 #include <HalClock.h>

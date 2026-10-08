@@ -36,10 +36,10 @@ ad-hoc ints and nesting forces the reader to reconstruct intent.
 
 ## Enum hygiene
 
-- `enum class` by default for type safety. Plain `enum` only when values must
-  implicitly convert (e.g. a value that doubles as a UI dropdown index), and
-  then give it a trailing `_COUNT` sentinel for safe bounds/iteration, matching
-  the existing settings enums.
+- `enum class` by default for type safety. A plain `enum` inside a namespace
+  only when the value is stored or passed as an integer (`TiltPageTurn` and
+  `PanelOrientation` are `uint8_t` on purpose). When code iterates every
+  value, give the enum a trailing `_COUNT` sentinel.
 - Name the discriminant after what it selects, not its storage:
   `Orientation orientation`, not `uint8_t mode`.
 - No magic numeric codes for states. If you write a comment mapping numbers to

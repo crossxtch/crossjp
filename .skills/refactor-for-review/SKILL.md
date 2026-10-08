@@ -35,7 +35,7 @@ next change easier is the win, not lines added.
 
 ## Decompose oversized units
 
-An activity or function that has outgrown one screen of responsibility (multiple
+A source file or function that has outgrown one responsibility (multiple
 unrelated state machines, or a file far larger than its siblings) is a
 decomposition candidate. Extract a cohesive sub-responsibility into its own
 unit, as a standalone behavior-preserving refactor, verified on its own, never

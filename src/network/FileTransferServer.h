@@ -83,6 +83,7 @@ class FileTransferServer {
   // here (that previously caused a double-free/heap corruption on stop()).
   class RawUploadHandler;
   RawUploadHandler* uploadHandler = nullptr;
+  bool installUploadHandler();
   void handleUploadStart();
   void handleUploadChunk(const uint8_t* data, size_t len);
   void handleUploadEnd(size_t totalBytes);

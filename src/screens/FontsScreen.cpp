@@ -1,4 +1,4 @@
-#include "FontsScreen.h"
+#include "screens/FontsScreen.h"
 
 #include <EpdFontFamily.h>
 #include <Gfx.h>
