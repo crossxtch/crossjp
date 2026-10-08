@@ -3,6 +3,7 @@
 
 #include "Kinsoku.h"
 #include "Layout.h"
+#include "PictureDither.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -316,6 +317,52 @@ int main() {
   expectRuby(ts::placeRubyAlong(100, 20, 10, 3, false, true), 100, 10, "3 kana shift into empty next");
   expectRuby(ts::placeRubyAlong(100, 20, 10, 3, true, false), 90, 10, "3 kana shift into empty prev");
   expectRuby(ts::placeRubyAlong(100, 20, 10, 4, false, true), 100, 10, "4 kana only next empty");
+
+  lay.begin(opt);
+  {
+    ts::Atom pic{};
+    pic.kind = ts::AtomKind::Picture;
+    pic.cp = 3;
+    if (!lay.feed(pic, 8) || lay.takenPicture() != 3 || lay.deferredPicture() != 0 || lay.pageGlyphCount() != 0) {
+      fail("picture on an empty page");
+    }
+  }
+  lay.begin(opt);
+  {
+    ts::Atom a{};
+    a.kind = ts::AtomKind::Ch;
+    a.cp = 0x3042;
+    lay.feed(a, 4);
+    ts::Atom pic{};
+    pic.kind = ts::AtomKind::Picture;
+    pic.cp = 4;
+    if (!lay.feed(pic, 20) || lay.deferredPicture() != 4 || lay.takenPicture() != 0 || lay.pageGlyphCount() < 1) {
+      fail("picture after glyphs should defer");
+    }
+    lay.clearPage();
+    if (!lay.feed(pic, 20) || lay.takenPicture() != 4 || lay.deferredPicture() != 0 || lay.pageGlyphCount() != 0) {
+      fail("replayed picture should be an empty page");
+    }
+  }
+
+  {
+    int16_t cur[4]{};
+    int16_t next[4]{};
+    uint8_t packed[1]{};
+    const uint8_t gray[4] = {255, 160, 96, 0};
+    ts::ditherRow(gray, 4, cur, next, packed, 0);
+    if (packed[0] != 0x1B) {
+      std::fprintf(stderr, "packed %02x\n", packed[0]);
+      fail("dither bins");
+    }
+    const ts::FitBox small = ts::containFit(100, 100, 528, 792);
+    const ts::FitBox wide = ts::containFit(1000, 100, 528, 792);
+    const ts::FitBox cover = ts::containFit(1600, 2400, 528, 792);
+    if (small.w != 100 || small.h != 100 || small.x != 214 || small.y != 346 || wide.w != 528 || wide.h != 52 ||
+        wide.y != 370 || cover.w != 528 || cover.h != 792 || cover.x != 0 || cover.y != 0) {
+      fail("contain fit");
+    }
+  }
 
   return 0;
 }

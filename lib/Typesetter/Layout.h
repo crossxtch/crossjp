@@ -11,8 +11,9 @@ enum class AtomKind : uint8_t {
   Space,
   ColumnBreak,
   PageBreak,
-  Group,  // unbreakable 熟語ルビ: tcy[] = bases, ruby[] = reading
-  Mode,   // cp 0 = vertical-rl, 1 = horizontal-tb
+  Group,    // unbreakable 熟語ルビ: tcy[] = bases, ruby[] = reading
+  Mode,     // cp 0 = vertical-rl, 1 = horizontal-tb
+  Picture,  // cp = 1-based page id in the picture sidecar. 0 is not a picture.
 };
 
 struct Atom {
@@ -99,6 +100,11 @@ class PageLayouter {
   // returned true and placed overflow/kinsoku glyphs on the new page).
   uint32_t currentPagePos() const { return firstOnCurrent; }
   uint16_t currentGlyphCount() const { return currentCount; }
+  // This feed committed an empty page whose bitmap is `cp`. The page is already
+  // the in-progress one (or must be pushed when the index was waiting).
+  uint16_t takenPicture() const { return takenId; }
+  // Glyphs were committed, and this picture atom has to be replayed as the next page.
+  uint16_t deferredPicture() const { return deferredId; }
 
  private:
   LayoutOptions opt{};
@@ -125,6 +131,8 @@ class PageLayouter {
   uint32_t lastAtomPos = 0;
   uint32_t firstOnCurrent = 0;
   uint32_t feedPos = 0;
+  uint16_t takenId = 0;
+  uint16_t deferredId = 0;
 
   bool columnClosed = false;
 

@@ -162,6 +162,49 @@ int main() {
     }
   }
   {
+    auto a = parse("<html><body class=\"p-cover\"><img src=\"c.jpg\"/></body></html>");
+    if (a.size() != 1 || a[0].kind != AtomKind::PageBreak) {
+      fail("cover without a decoder stays a page break");
+    }
+  }
+  {
+    struct Bag {
+      std::vector<Atom> atoms;
+      int hits = 0;
+    };
+    auto emit = [](void* ctx, const Atom& atom, uint32_t) {
+      static_cast<Bag*>(ctx)->atoms.push_back(atom);
+      return true;
+    };
+    auto pic = [](void* ctx, const char* src) -> uint16_t {
+      if (!src || std::strcmp(src, "c.jpg") != 0) {
+        return 0;
+      }
+      ++static_cast<Bag*>(ctx)->hits;
+      return 4;
+    };
+    Bag bag;
+    const char* html = "<html><body class=\"p-cover\"><img src=\"c.jpg\"/></body></html>";
+    ts::AtomSink sink{&bag, emit, pic};
+    ts::htmlToAtoms(html, std::strlen(html), sink, nullptr);
+    if (bag.hits != 1 || bag.atoms.size() != 1 || bag.atoms[0].kind != AtomKind::Picture || bag.atoms[0].cp != 4) {
+      fail("cover picture");
+    }
+    bag.atoms.clear();
+    bag.hits = 0;
+    html = "<html><body class=\"p-cover\"><img class=\"gaiji\" src=\"gaiji-cid13803.png\" alt=\"〓\"/></body></html>";
+    ts::htmlToAtoms(html, std::strlen(html), sink, nullptr);
+    if (bag.hits != 0 || bag.atoms.size() != 1 || bag.atoms[0].kind != AtomKind::Ch || bag.atoms[0].cp != 0x20B9F) {
+      fail("cover gaiji stayed a bitmap");
+    }
+    bag.atoms.clear();
+    html = "<html><body><p><img src=\"a.jpg\"/></p></body></html>";
+    ts::htmlToAtoms(html, std::strlen(html), sink, nullptr);
+    if (bag.hits != 0) {
+      fail("inline image called the picture decoder");
+    }
+  }
+  {
     auto a = parse("<p><img alt=\"図\"/></p>");
     if (a.size() != 1 || a[0].kind != AtomKind::Ch || a[0].cp != 0x56F3) {
       fail("img alt");

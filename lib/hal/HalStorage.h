@@ -36,6 +36,12 @@ class HalStorage {
   bool remove(const char* path);
   bool rename(const char* oldPath, const char* newPath);
   bool rmdir(const char* path);
+  // Bytes still free for file data. False when the card is absent or the FAT
+  // cannot be read. Scans the FAT; call it after a failed write, not per chunk.
+  bool freeBytes(uint64_t* out);
+  // Send the SD stop token when a multi-block write was left open. True when
+  // the card is idle, including when it already was. `errorBefore` may be null.
+  bool recoverCard(uint8_t* errorBefore);
 
   bool openFileForRead(const char* moduleName, const char* path, HalFile& file);
   bool openFileForRead(const char* moduleName, const std::string& path, HalFile& file);
@@ -73,6 +79,8 @@ class HalFile : public Print {
   HalFile& operator=(const HalFile&) = delete;
 
   void flush();
+  // Directory and data. flush() drops the result; a failed sync must not publish.
+  bool sync();
   // SdFat getName() returns 0 and an empty string if `len` cannot hold the
   // whole UTF-8 name plus NUL. FAT/exFAT LFN is 255 UTF-16 units, which is
   // up to 765 UTF-8 bytes for BMP characters.
@@ -102,6 +110,8 @@ class HalFile : public Print {
   size_t write(const uint8_t* buf, size_t count) override;
   size_t write(const void* buf, size_t count);
   size_t write(uint8_t b) override;
+  // FatFile::write sets this and returns 0. Clear it before seeking back to retry.
+  void clearWriteError();
   bool rename(const char* newPath);
   bool isDirectory() const;
   void rewindDirectory();

@@ -28,6 +28,8 @@ void PageLayouter::begin(const LayoutOptions& options) {
   lastAtomPos = 0;
   firstOnCurrent = 0;
   feedPos = 0;
+  takenId = 0;
+  deferredId = 0;
   columnClosed = false;
   if (!recomputeGrid()) {
     return;
@@ -395,7 +397,25 @@ void PageLayouter::placeGroup(const Atom& atom) {
 bool PageLayouter::feed(const Atom& atom, const uint32_t atomPos) {
   pageReady = false;
   feedPos = atomPos;
+  takenId = 0;
+  deferredId = 0;
   switch (atom.kind) {
+    case AtomKind::Picture: {
+      const uint16_t id = static_cast<uint16_t>(atom.cp);
+      if (id == 0) {
+        break;
+      }
+      // One committed buffer. Glyphs already on this page stay a text page;
+      // the picture is replayed from this atom on the following page.
+      if (currentCount > 0) {
+        newPage();
+        deferredId = id;
+      } else {
+        newPage();
+        takenId = id;
+      }
+      break;
+    }
     case AtomKind::PageBreak:
       if (currentCount > 0) {
         newPage();

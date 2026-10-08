@@ -28,6 +28,11 @@
 #define CROSSJP_VERSION "dev"
 #endif
 
+// EPUB inflate flushes each block straight into an SD write. On the default
+// 8 KB loopTask that path dies with the stack canary (puff dynamic tables +
+// FatFile::write + SPI). The Huffman tables are static; this is the rest.
+SET_LOOP_TASK_STACK_SIZE(12 * 1024);
+
 Gfx gfx(display);
 MappedInput mappedInput(gpio);
 ScreenManager screenManager(gfx, mappedInput);

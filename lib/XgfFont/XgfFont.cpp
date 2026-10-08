@@ -22,20 +22,19 @@ uint8_t pixelAt(const uint8_t* slot, const uint8_t em, const int x, const int y)
   return static_cast<uint8_t>((b >> shift) & 3u);
 }
 
+// 0 paper, 1 light, 2 dark, 3 black. Ink is every non-paper pixel, so the
+// base frame is the full stroke. The UC8253 `_gc` nudge drives a marked
+// gray pixel (BW 0x80 / WW 0x20) instead of holding the black the base
+// just set. On a reading face those marks are the stem, not a photo gray,
+// and the drive turns characters into blocks. Leave both gray planes
+// unmarked so every glyph pixel holds. Picture pages use their own map.
 bool planeKeep(const uint8_t v, const XgfFont::Plane plane) {
-  switch (plane) {
-    case XgfFont::Plane::Ink:
-      return v >= xgf::kInkThreshold;
-    case XgfFont::Plane::Lsb:
-      return (v & 1u) != 0;
-    case XgfFont::Plane::Msb:
-      return (v & 2u) != 0;
-  }
-  return false;
+  return plane == XgfFont::Plane::Ink && v >= xgf::kInkThreshold;
 }
 
-// AND-clear `nBits` MSB-first bits from `src` into a panel row at pixel `x`.
-void andNotBits(uint8_t* row, const int rowBits, int x, const uint8_t* src, int nBits) {
+// Paint `nBits` MSB-first bits from `src` into a panel row at pixel `x`.
+// `black` clears those bits. Otherwise it sets them (white on a gray plane).
+void paintRowBits(uint8_t* row, const int rowBits, int x, const uint8_t* src, int nBits, const bool black) {
   int s = 0;
   if (x < 0) {
     s = -x;
@@ -61,7 +60,12 @@ void andNotBits(uint8_t* row, const int rowBits, int x, const uint8_t* src, int 
     uint8_t chunk = static_cast<uint8_t>(src[s >> 3] << sOff);
     chunk = static_cast<uint8_t>(chunk >> dOff);
     const uint8_t m = static_cast<uint8_t>(((1u << take) - 1u) << (8 - dOff - take));
-    row[x >> 3] &= static_cast<uint8_t>(~(chunk & m));
+    const uint8_t bits = static_cast<uint8_t>(chunk & m);
+    if (black) {
+      row[x >> 3] &= static_cast<uint8_t>(~bits);
+    } else {
+      row[x >> 3] |= bits;
+    }
     x += take;
     s += take;
     nBits -= take;
@@ -112,13 +116,33 @@ bool XgfFont::load(const char* path, const uint32_t lruMaxBytes, const bool want
 
 void XgfFont::close() {
   opened = false;
-  if (file.isOpen()) {
-    file.close();
-  }
+  releaseFile();
   freeTables();
   freeLru();
   header = {};
   filepath[0] = '\0';
+}
+
+void XgfFont::releaseFile() {
+  if (file.isOpen()) {
+    file.close();
+  }
+}
+
+bool XgfFont::reopenFile() {
+  if (file.isOpen()) {
+    return true;
+  }
+  if (filepath[0] == '\0') {
+    error = "font missing";
+    return false;
+  }
+  if (!Storage.openFileForRead("XGF", filepath, file)) {
+    error = "font missing";
+    return false;
+  }
+  file.probeContiguous();
+  return true;
 }
 
 bool XgfFont::readHeader() {
@@ -387,10 +411,77 @@ bool XgfFont::readSlot(const uint16_t bodyId, const bool ruby, uint8_t* dest) {
     stride = header.bodyStride;
     off = header.bodyBitsOff + static_cast<uint32_t>(bodyId) * stride;
   }
-  if (!file.seekSet(off)) {
+  const unsigned long tSd = micros();
+  const bool sought = file.seekSet(off);
+  const int n = sought ? file.read(dest, stride) : 0;
+  statSdUs += static_cast<uint32_t>(micros() - tSd);
+  ++statSdReads;
+  if (n > 0) {
+    statSdBytes += static_cast<uint32_t>(n);
+  }
+  if (!sought || n != static_cast<int>(stride)) {
     return false;
   }
-  return file.read(dest, stride) == static_cast<int>(stride);
+  for (uint16_t i = 0; i < stride; ++i) {
+    if (dest[i] != 0xFF) {
+      return true;
+    }
+  }
+  // Paper is 0x00. Every pixel 0xFF is MISO idle while the panel holds the
+  // bus, not a mincho slot (this face has none). Leave it uncached.
+  ++statFf;
+  LOG_ERR("XGF", "slot %u %s is 0xFF", bodyId, ruby ? "ruby" : "body");
+  return false;
+}
+
+bool XgfFont::probe(const uint16_t bodyId, const bool ruby, SlotProbe& out) const {
+  out = {};
+  const Lru& t = ruby ? rubyLru : bodyLru;
+  const uint8_t* slot = nullptr;
+  for (uint16_t i = 0; i < t.used; ++i) {
+    if (t.entries[i].id == bodyId) {
+      slot = t.pixels + static_cast<size_t>(i) * t.stride;
+      break;
+    }
+  }
+  if (!slot || t.stride == 0) {
+    return false;
+  }
+  out.cached = true;
+  uint32_t hash = 2166136261u;
+  for (uint16_t i = 0; i < t.stride; ++i) {
+    hash ^= slot[i];
+    hash *= 16777619u;
+  }
+  out.hash = hash;
+  const uint8_t em = ruby ? header.rubyEmPx : header.emPx;
+  out.area = static_cast<uint16_t>(em * em);
+  uint16_t ink = 0;
+  for (int y = 0; y < em; ++y) {
+    for (int x = 0; x < em; ++x) {
+      if (pixelAt(slot, em, x, y) >= xgf::kInkThreshold) {
+        ++ink;
+      }
+    }
+  }
+  out.ink = ink;
+  return true;
+}
+
+XgfFont::CacheStats XgfFont::cacheStats() const {
+  CacheStats s;
+  s.bodyUsed = bodyLru.used;
+  s.bodyCap = bodyLru.cap;
+  s.rubyUsed = rubyLru.used;
+  s.rubyCap = rubyLru.cap;
+  s.hits = statHit;
+  s.misses = statMiss;
+  s.rejected = statFf;
+  s.blocked = statBlocked;
+  s.sdReads = statSdReads;
+  s.sdBytes = statSdBytes;
+  s.sdUs = statSdUs;
+  return s;
 }
 
 const uint8_t* XgfFont::cacheIn(Lru& t, const uint16_t bodyId, const bool ruby) {
@@ -408,6 +499,7 @@ const uint8_t* XgfFont::cacheIn(Lru& t, const uint16_t bodyId, const bool ruby) 
         }
         t.clock = 0x8000;
       }
+      ++statHit;
       return t.pixels + static_cast<size_t>(i) * t.stride;
     }
     if (t.entries[i].recency <= oldest) {
@@ -415,6 +507,11 @@ const uint8_t* XgfFont::cacheIn(Lru& t, const uint16_t bodyId, const bool ruby) 
       victim = i;
     }
   }
+  if (!allowSdReads) {
+    ++statBlocked;
+    return nullptr;
+  }
+  ++statMiss;
   uint16_t slot = victim;
   if (t.used < t.cap) {
     slot = t.used++;
@@ -509,6 +606,7 @@ bool XgfFont::blit(Gfx& gfx, const int x, const int y, const uint16_t bodyId, co
   const int ph = gfx.fbHeight();
   const int rowBytes = (static_cast<int>(em) + 3) / 4;
 
+  const bool black = plane == Plane::Ink;
   if (rotate90) {
     // Source row gy is consecutive phyX on panel row phyY (90° CW).
     uint8_t mask[8];
@@ -518,7 +616,7 @@ bool XgfFont::blit(Gfx& gfx, const int x, const int y, const uint16_t bodyId, co
         continue;
       }
       fillRowMask(mask, slot + gy * rowBytes, em, rowBytes, plane);
-      andNotBits(fb + phyY * stride, pw, y, mask, em);
+      paintRowBits(fb + phyY * stride, pw, y, mask, em, black);
     }
     return true;
   }
@@ -544,7 +642,12 @@ bool XgfFont::blit(Gfx& gfx, const int x, const int y, const uint16_t bodyId, co
         if (phyY < 0 || phyY >= ph) {
           continue;
         }
-        fb[phyY * stride + col] &= clr;
+        uint8_t* cell = &fb[phyY * stride + col];
+        if (black) {
+          *cell &= clr;
+        } else {
+          *cell |= static_cast<uint8_t>(~clr);
+        }
       }
     }
   }
@@ -582,7 +685,7 @@ bool XgfFont::blitBox(Gfx& gfx, const int x, const int y, const uint16_t bodyId,
         }
       }
       if (ink) {
-        gfx.drawPixel(x + dx, y + dy, true);
+        gfx.drawPixel(x + dx, y + dy, plane == Plane::Ink);
       }
     }
   }

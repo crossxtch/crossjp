@@ -9,10 +9,14 @@ namespace ts {
 
 class ZipArchive {
  public:
-  static constexpr uint16_t kMaxEntries = 192;
+  // Central-directory records, directories included. A 7-volume EPUB can
+  // list several hundred files. Inline 96-byte names made that table larger
+  // than the free DRAM block left after the framebuffer is allocated.
+  static constexpr uint16_t kMaxEntries = 4096;
 
   struct Entry {
-    char name[96]{};
+    // Points into the same allocation as the entry table.
+    const char* name = nullptr;
     uint32_t localOff = 0;
     uint32_t compSize = 0;
     uint32_t uncompSize = 0;
@@ -26,8 +30,14 @@ class ZipArchive {
 
   bool open(const char* path);
   void close();
+  // Drop the SD handle and open it again. The central directory stays in RAM.
+  // Ingest creates the atom file while this handle is released.
+  void releaseFile();
+  bool reopenFile();
   const Entry* find(const char* name) const;
   const Entry* findSuffix(const char* suffix) const;
+  // 0xFFFF when `e` is not one of this archive's entries.
+  uint16_t indexOf(const Entry* e) const;
 
   // Inflate into malloc'd buffer (caller free()). nullptr on failure.
   uint8_t* extract(const Entry& e, size_t* outLen);
@@ -39,6 +49,8 @@ class ZipArchive {
 
  private:
   HalFile file;
+  char openedPath[256]{};
+  // One calloc: Entry[n] followed by the NUL-terminated names.
   Entry* entries = nullptr;
   uint16_t n = 0;
   const char* error = "closed";

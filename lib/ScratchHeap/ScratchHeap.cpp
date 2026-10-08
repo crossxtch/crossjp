@@ -56,3 +56,7 @@ void ScratchHeap::release() {
   capacity = 0;
   logHeap("Released scratch");
 }
+
+uint8_t* ScratchHeap::data() { return block; }
+
+size_t ScratchHeap::size() { return capacity; }

@@ -38,9 +38,11 @@ void removeFor(const char* bookPath) {
     }
   };
   drop("a");
+  drop("b");
   drop("t");
   drop("c");
   drop("p");
+  drop("i");
   if (settings.lastBookPath[0] && strcmp(settings.lastBookPath, bookPath) == 0) {
     settings.lastBookPath[0] = '\0';
     settings.save();
@@ -58,9 +60,11 @@ unsigned clearAll() {
     if (file.isDirectory() || file.getName(name, sizeof(name)) == 0) {
       continue;
     }
-    const bool sidecar = (name[0] == 'a' || name[0] == 't' || name[0] == 'c' || name[0] == 'p') &&
-                         name[1] == '_' && strstr(name, ".bin") != nullptr;
-    if (sidecar || strcmp(name, "work.xhtml") == 0) {
+    const char tag = name[0];
+    const bool sidecar = name[1] == '_' && strchr("abtcpi", tag) != nullptr && strstr(name, ".bin") != nullptr;
+    const bool work = strcmp(name, "work.xhtml") == 0 || strcmp(name, "work.opf") == 0 ||
+                      strcmp(name, "work.toc") == 0 || strcmp(name, "work.img") == 0;
+    if (sidecar || work) {
       doomed.emplace_back(name);
     }
   }

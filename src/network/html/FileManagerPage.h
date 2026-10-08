@@ -256,6 +256,13 @@ footer {
 let path = "/";
 let activeUpload = null;
 let retryTimer = null;
+let uploadActive = false;
+let uploadCanceled = false;
+let uploadName = "";
+let uploadDir = "/";
+const UPLOAD_CHUNK = 1048576;
+const UPLOAD_TRIES = 8;
+const UPLOAD_RETRY_WAIT_MS = 1500;
 const ICO_DIR = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 7a2 2 0 012-2h5l2 2h7a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>';
 const ICO_FILE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8z"/><path d="M14 3v5h5"/></svg>';
 
@@ -265,9 +272,10 @@ function status(msg, kind) {
   el.className = kind || "";
 }
 
-function uploadBusy() { return activeUpload || retryTimer; }
+function uploadBusy() { return uploadActive || activeUpload || retryTimer; }
 
 function resetUploadUi() {
+  uploadActive = false;
   activeUpload = null;
   if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
   const dropZone = document.getElementById("dropZone");
@@ -448,7 +456,18 @@ function loadFonts() {
     .catch(e => status("Error: " + e, "bad"));
 }
 
-function upload(file, attempt) {
+function showUploadProgress(loaded, total, speed) {
+  const pct = total ? Math.min(100, Math.round((loaded / total) * 100)) : 100;
+  document.getElementById("uploadBar").style.width = pct + "%";
+  let msg = "Uploading " + pct + "%  ·  " + formatSize(loaded) + " / " + formatSize(total);
+  if (speed) msg += "  ·  " + formatSize(speed) + "/s";
+  status(msg);
+}
+
+// One POST per 1 MB. A dropped connection retries that slice. The device gives
+// up a quiet slice after 5s, so wait briefly and send it again. HTTP 409 means
+// the device no longer has the prefix, so the file starts over once.
+function upload(file) {
   if (!file) return;
   if (file.name.length > 255) {
     status("Filename too long (max 255 characters)", "bad");
@@ -456,77 +475,145 @@ function upload(file, attempt) {
   }
   if (uploadBusy()) { status("Upload already in progress", "bad"); return; }
 
+  uploadCanceled = false;
+  uploadActive = true;
+  uploadName = file.name;
+  uploadDir = path;
+
   const wrap = document.getElementById("uploadProgress");
-  const bar = document.getElementById("uploadBar");
   const cancelBtn = document.getElementById("cancelUpload");
   const dropZone = document.getElementById("dropZone");
   wrap.style.display = "block";
-  bar.style.width = "0%";
+  document.getElementById("uploadBar").style.width = "0%";
   cancelBtn.style.display = "inline-flex";
   dropZone.classList.add("busy");
   dropZone.querySelector(".drop-title").textContent = file.name;
-  dropZone.querySelector(".drop-sub").textContent = attempt ? "retrying" : "sending to device";
+  dropZone.querySelector(".drop-sub").textContent = "sending to device";
+  showUploadProgress(0, file.size, 0);
+  sendSlice(file, 0, false);
+}
+
+function sendSlice(file, offset, didRestart) {
+  if (uploadCanceled) return;
+  const end = Math.min(offset + UPLOAD_CHUNK, file.size);
+  postSlice(file, file.slice(offset, end), offset, 1, didRestart);
+}
+
+function retrySlice(file, blob, offset, attempt, didRestart) {
+  activeUpload = null;
+  if (uploadCanceled) return;
+  if (attempt >= UPLOAD_TRIES) {
+    resetUploadUi();
+    status("Upload failed — wait a moment and try again", "bad");
+    return;
+  }
+  const sub = document.querySelector("#dropZone .drop-sub");
+  if (sub) sub.textContent = "retrying";
+  status("Connection dropped, retrying…");
+  retryTimer = setTimeout(() => {
+    retryTimer = null;
+    postSlice(file, blob, offset, attempt + 1, didRestart);
+  }, UPLOAD_RETRY_WAIT_MS);
+}
+
+function postSlice(file, blob, offset, attempt, didRestart) {
+  if (uploadCanceled) return;
+  const sub = document.querySelector("#dropZone .drop-sub");
+  if (sub && attempt === 1) sub.textContent = "sending to device";
 
   let lastTime = performance.now();
   let lastLoaded = 0;
   let speed = 0;
-
+  let settled = false;
   const xhr = new XMLHttpRequest();
   activeUpload = xhr;
-  xhr.timeout = 10 * 60 * 1000;
+  xhr.timeout = 90 * 1000;
   xhr.upload.onprogress = (e) => {
     const now = performance.now();
     const dt = (now - lastTime) / 1000;
     if (dt > 0.2) {
-      const instantSpeed = (e.loaded - lastLoaded) / dt;
-      speed = speed ? speed * 0.7 + instantSpeed * 0.3 : instantSpeed;
+      const instant = (e.loaded - lastLoaded) / dt;
+      speed = speed ? speed * 0.7 + instant * 0.3 : instant;
       lastTime = now;
       lastLoaded = e.loaded;
     }
-    if (e.lengthComputable) {
-      const pct = Math.round((e.loaded / e.total) * 100);
-      bar.style.width = pct + "%";
-      status("Uploading " + pct + "%  ·  " + formatSize(e.loaded) + " / " + formatSize(e.total) +
-             "  ·  " + formatSize(speed) + "/s");
-    } else {
-      status("Uploading  ·  " + formatSize(e.loaded) + "  ·  " + formatSize(speed) + "/s");
-    }
+    showUploadProgress(offset + e.loaded, file.size, speed);
   };
-  xhr.onload = () => {
-    const ok = xhr.status >= 200 && xhr.status < 300;
-    resetUploadUi();
-    status(xhr.responseText, ok ? "ok" : "bad");
-    load();
-  };
-  xhr.onerror = () => {
+  function finish(fn) {
+    if (settled || uploadCanceled) return;
+    settled = true;
     activeUpload = null;
-    if (!attempt) {
-      status("Connection dropped, retrying…");
-      retryTimer = setTimeout(() => { retryTimer = null; upload(file, 1); }, 2000);
-      return;
-    }
-    resetUploadUi();
-    status("Upload failed — wait a moment and try again", "bad");
+    fn();
+  }
+  xhr.onload = () => {
+    finish(() => {
+      if (xhr.status === 0) {
+        retrySlice(file, blob, offset, attempt, didRestart);
+        return;
+      }
+      if (xhr.status === 409) {
+        if (didRestart || offset === 0) {
+          resetUploadUi();
+          status("Upload failed — the device lost the partial file", "bad");
+          return;
+        }
+        status("Device lost the partial file, starting over…");
+        retryTimer = setTimeout(() => { retryTimer = null; sendSlice(file, 0, true); }, 400);
+        return;
+      }
+      if (xhr.status >= 200 && xhr.status < 300) {
+        const next = offset + blob.size;
+        if (next >= file.size) {
+          resetUploadUi();
+          status(xhr.responseText, "ok");
+          load();
+          return;
+        }
+        showUploadProgress(next, file.size, speed);
+        sendSlice(file, next, didRestart);
+        return;
+      }
+      resetUploadUi();
+      status(xhr.responseText || "Upload failed", "bad");
+    });
   };
-  xhr.ontimeout = () => {
-    resetUploadUi();
-    status("Upload timed out — check the device and retry", "bad");
-  };
-  xhr.onabort = () => { resetUploadUi(); status("Upload canceled"); load(); };
-  xhr.open("POST", "/upload");
-  xhr.setRequestHeader("Content-Type", "application/octet-stream");
-  xhr.setRequestHeader("X-File-Path", encodeURIComponent(path));
-  xhr.setRequestHeader("X-File-Name", encodeURIComponent(file.name));
-  xhr.send(file);
-}
-
-function cancelUpload() {
-  if (activeUpload) activeUpload.abort();
-  else {
+  xhr.onerror = () => { finish(() => retrySlice(file, blob, offset, attempt, didRestart)); };
+  xhr.ontimeout = () => { finish(() => retrySlice(file, blob, offset, attempt, didRestart)); };
+  xhr.onabort = () => {
+    settled = true;
+    activeUpload = null;
+    if (uploadCanceled) return;
     resetUploadUi();
     status("Upload canceled");
     load();
+  };
+  xhr.open("POST", "/upload");
+  xhr.setRequestHeader("Content-Type", "application/octet-stream");
+  xhr.setRequestHeader("X-File-Path", encodeURIComponent(uploadDir));
+  xhr.setRequestHeader("X-File-Name", encodeURIComponent(file.name));
+  xhr.setRequestHeader("X-Upload-Offset", String(offset));
+  xhr.setRequestHeader("X-Upload-Total", String(file.size));
+  xhr.send(blob);
+}
+
+function cancelUpload() {
+  if (!uploadBusy()) return;
+  uploadCanceled = true;
+  const name = uploadName;
+  const dir = uploadDir;
+  if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
+  if (activeUpload) activeUpload.abort();
+  activeUpload = null;
+  if (name) {
+    fetch("/upload/cancel", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: "name=" + encodeURIComponent(name) + "&path=" + encodeURIComponent(dir)
+    }).catch(() => {});
   }
+  resetUploadUi();
+  status("Upload canceled");
+  load();
 }
 
 function mkdir() {

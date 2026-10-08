@@ -11,7 +11,9 @@ class ReaderScreen;
 
 class ChapterSelectionScreen final : public Screen {
   ReaderScreen& reader;
-  std::vector<ts::ChapterInfo> chapters;
+  // The open book's list. Copying every title allocates again and abort()s
+  // once the font cache has split the heap (exceptions are disabled).
+  const std::vector<ts::ChapterInfo>& chapters;
   uint32_t currentPage;
   uint16_t pageCount;
   int index = 0;

@@ -25,3 +25,6 @@ lib/EpdFont/scripts/instanced_fonts/
 lib/EpdFont/scripts/output/
 *.cpfont
 *.generated.h
+
+tools/macfont/.build/
+tools/macfont/*.app/

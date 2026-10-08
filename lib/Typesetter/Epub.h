@@ -2,15 +2,21 @@
 
 #include "AtomFile.h"
 #include "HtmlIR.h"
+#include "PicturePage.h"
 #include "Zip.h"
 
 #include <cstdint>
 
 namespace ts {
 
+class HtmlSax;
+
 class EpubBook {
  public:
-  static constexpr uint16_t kMaxSpine = 192;
+  // Spine slots kept for one ingest. A combined series can list several hundred
+  // files. Each slot stays small so a 32KB deflate window still fits beside the
+  // zip table (the previous 212-byte slot left only a 26KB hole).
+  static constexpr uint16_t kMaxSpine = 512;
 
   EpubBook() = default;
   ~EpubBook() { close(); }
@@ -19,7 +25,9 @@ class EpubBook {
 
   using ProgressFn = void (*)(void* ctx, uint16_t done, uint16_t total);
 
-  bool open(const char* epubPath, const char* atomPath, ProgressFn progress = nullptr, void* progressCtx = nullptr);
+  // pageW/pageH are the logical portrait. picturePath receives PIC1 pages. Either may be empty.
+  bool open(const char* epubPath, const char* atomPath, ProgressFn progress = nullptr, void* progressCtx = nullptr,
+            uint16_t pageW = 0, uint16_t pageH = 0, const char* picturePath = nullptr);
   void close();
 
   const char* title() const { return bookTitle; }
@@ -29,14 +37,19 @@ class EpubBook {
   const char* lastError() const { return error; }
 
   struct Spine {
-    char href[96]{};
-    char title[64]{};
-    char type[40]{};
+    static constexpr uint8_t kOther = 0;
+    static constexpr uint8_t kHtml = 1;
+    static constexpr uint8_t kImage = 2;
+    static constexpr uint8_t kSvg = 3;
+    // Index into the open zip. 0xFFFF until parse resolves the href.
+    uint16_t zipIndex = 0xFFFFu;
+    uint16_t chCount = 0;
+    uint32_t atomOff = 0;
+    uint8_t kind = kOther;
     uint8_t compact = 0;
     uint8_t hasMode = 0;
     WritingMode mode = WritingMode::VerticalRl;
-    uint32_t atomOff = 0;
-    uint16_t chCount = 0;
+    char title[64]{};
   };
   const Spine& spine(uint16_t i) const { return items[i]; }
 
@@ -63,9 +76,10 @@ class EpubBook {
   const char* error = "closed";
 
   bool parseContainer(char* opfName, size_t cap);
-  bool parseOpf(const char* xml, size_t n);
-  bool parseNcx(const char* xml, size_t n);
-  bool parseNavDoc(const char* xml, size_t n);
+  // `rewind` rebinds `sax` to the start of the OPF (memory or a work file).
+  bool parseOpf(bool (*rewind)(void* ctx, HtmlSax* sax), void* ctx, const char* opfDir);
+  bool parseNcx(HtmlSax& sax);
+  bool parseNavDoc(HtmlSax& sax);
   bool loadTocDoc(const char* opfDir);
   void addToc(const char* title, const char* href);
   void bindTocToSpine();

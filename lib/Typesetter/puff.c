@@ -778,9 +778,11 @@ local int dynamic(struct state *s)
     int nlen, ndist, ncode;             /* number of lengths in descriptor */
     int index;                          /* index of lengths[] */
     int err;                            /* construct() return value */
-    short lengths[MAXCODES];            /* descriptor code lengths */
-    short lencnt[MAXBITS+1], lensym[MAXLCODES];         /* lencode memory */
-    short distcnt[MAXBITS+1], distsym[MAXDCODES];       /* distcode memory */
+    /* These tables are about 1.3 KB. On the stack they sit under FatFile::write
+     * (the flush callback) and overflow loopTask. One inflate at a time. */
+    static short lengths[MAXCODES];     /* descriptor code lengths */
+    static short lencnt[MAXBITS+1], lensym[MAXLCODES];  /* lencode memory */
+    static short distcnt[MAXBITS+1], distsym[MAXDCODES];/* distcode memory */
     struct huffman lencode, distcode;   /* length and distance codes */
     static const short order[19] =      /* permutation of code length codes */
         {16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15};

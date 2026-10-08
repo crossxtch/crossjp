@@ -24,7 +24,7 @@ class TypesetBook {
   void close();
   bool isOpen() const { return opened; }
 
-  uint16_t pageCount() const { return static_cast<uint16_t>(pageOffsets.size()); }
+  uint16_t pageCount() const { return nPages; }
   const char* title() const { return bookTitle; }
   const char* path() const { return filepath; }
   const char* lastError() const { return error; }
@@ -42,13 +42,18 @@ class TypesetBook {
   char filepath[256]{};
   char bookTitle[128]{};
   char atomPath[64]{};
+  char picturePath[64]{};
   const char* error = "not open";
   XgfFont font;
   ts::AtomReader atoms;
   ts::PageLayouter layouter;
   ts::LayoutOptions layoutOpt{};
-  std::vector<uint32_t> pageOffsets;
-  std::vector<uint8_t> pageModes;  // writing mode to begin() each page with
+  // Page records stay on the index file. A seven-volume book is tens of thousands
+  // of pages, and holding the three tables in RAM aborts in operator new.
+  mutable HalFile indexFile;
+  uint16_t nPages = 0;
+  uint8_t indexBuf[504]{};
+  uint16_t indexBufN = 0;
   std::vector<ts::ChapterInfo> chapters;
   struct ChapterMark {
     uint32_t atomOff = 0;
@@ -62,20 +67,26 @@ class TypesetBook {
   uint32_t loadedPage = 0xFFFFFFFFu;
   ts::GlyphRun loadedGlyphs[ts::PageLayouter::kMaxGlyphs]{};
   uint16_t loadedCount = 0;
+  uint16_t loadedPicture = 0;
+  uint8_t* pictureBits = nullptr;  // borrowed ScratchHeap page, valid only while painting
 
   bool loadFont(const char* fontPath);
   bool ingestTxt();
   bool ingestEpub(ts::EpubBook::ProgressFn progress, void* progressCtx);
   bool buildIndex();
   bool loadIndex();
-  bool saveIndex() const;
+  bool finishIndex();
+  bool flushIndex();
+  bool appendPage(uint32_t off, uint8_t mode, uint16_t pic);
+  bool setLastPicture(uint16_t pic);
+  bool readPage(uint32_t index, uint32_t& off, uint8_t& mode, uint16_t& pic) const;
   bool atomCacheFresh() const;
   bool layoutPage(uint32_t pageIndex);
   void paint(Gfx& gfx, XgfFont::Plane plane);
+  void logPaintedGlyphs(Gfx& gfx, uint32_t pageIndex) const;
   void indexPath(char* out, size_t outSize) const;
   void chapterPath(char* out, size_t outSize) const;
   bool saveChapterSidecar() const;
   bool loadChapterSidecar();
   void applyChapters();
-  uint16_t pageForAtom(uint32_t atomOff) const;
 };

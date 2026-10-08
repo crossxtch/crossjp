@@ -10,6 +10,8 @@ namespace ts {
 struct AtomSink {
   void* ctx = nullptr;
   bool (*emit)(void* ctx, const Atom& atom, uint32_t pos) = nullptr;
+  // Full-page picture. Return a 1-based id, or 0 to keep a blank page break.
+  uint16_t (*picture)(void* ctx, const char* src) = nullptr;
 };
 
 struct HtmlIRResult {

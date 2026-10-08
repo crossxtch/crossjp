@@ -1,0 +1,21 @@
+{
+  "name": "SDCardManager",
+  "version": "2.0.0",
+  "description": "Vendored FreeInk SDCardManager. Local additions: freeBytes, recoverCard, and a 20 MHz X3 SD clock on the shared panel SPI. Do not edit the submodule copy.",
+  "keywords": "sd, sdfat, storage, fs",
+  "authors": [
+    {
+      "name": "FreeInk SDK Contributors"
+    }
+  ],
+  "dependencies": {
+    "greiman/SdFat": "^2.3.1"
+  },
+  "platforms": "espressif32",
+  "frameworks": [
+    "arduino"
+  ],
+  "build": {
+    "extraScript": "inject_build_flags.py"
+  }
+}

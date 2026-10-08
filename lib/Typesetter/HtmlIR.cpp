@@ -659,10 +659,19 @@ static bool htmlFromSax(HtmlSax& sax, const AtomSink sink, HtmlIRResult* result)
           } else if (const uint32_t mapped = cidChar(cidFromSrc(src))) {
             emit(chAtom(mapped, nullptr, 0, curEmph), sax.pos);
           }
-        } else if (pictureBody) {
-          Atom pb{};
-          pb.kind = AtomKind::PageBreak;
-          emit(pb, sax.pos);
+        } else if (pictureBody && textCount < 2000) {
+          uint16_t id = 0;
+          if (sink.picture && src[0]) {
+            id = sink.picture(sink.ctx, src);
+          }
+          Atom pic{};
+          if (id != 0) {
+            pic.kind = AtomKind::Picture;
+            pic.cp = id;
+          } else {
+            pic.kind = AtomKind::PageBreak;
+          }
+          emit(pic, sax.pos);
         } else if (nCp > 0 && (inHeading || heightEmOf(sax) > 0 || nCp <= 8)) {
           uint32_t digits[4]{};
           uint8_t dN = 0;

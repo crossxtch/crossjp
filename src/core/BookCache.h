@@ -7,8 +7,10 @@
 namespace BookCache {
 
 uint32_t key(const char* path);
+// a_ atom, b_ alternate atom, t_ page index, c_ chapters, p_ progress, i_ pictures.
 void removeFor(const char* bookPath);
-// Drops a_*/t_*/c_*/p_*.bin and work.xhtml. Keeps settings.bin and fonts/.
+// Those sidecars, plus work.xhtml / work.opf / work.toc / work.img.
+// Keeps settings.bin and fonts/.
 unsigned clearAll();
 
 }  // namespace BookCache

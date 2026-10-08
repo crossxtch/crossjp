@@ -97,6 +97,16 @@ bool HalStorage::rename(const char* oldPath, const char* newPath) {
 
 bool HalStorage::rmdir(const char* path) { HAL_STORAGE_WRAPPED_CALL(rmdir, path); }
 
+bool HalStorage::freeBytes(uint64_t* out) {
+  StorageLock lock;
+  return SDCard.freeBytes(out);
+}
+
+bool HalStorage::recoverCard(uint8_t* errorBefore) {
+  StorageLock lock;
+  return SDCard.recoverCard(errorBefore);
+}
+
 bool HalStorage::openFileForRead(const char* moduleName, const char* path, HalFile& file) {
   StorageLock lock;  // ensure thread safety for the duration of this function
   FsFile fsFile;
@@ -145,6 +155,12 @@ bool HalStorage::removeDir(const char* path) { HAL_STORAGE_WRAPPED_CALL(removeDi
   return impl->file.method(__VA_ARGS__);
 
 void HalFile::flush() { HAL_FILE_WRAPPED_CALL(flush, ); }
+bool HalFile::sync() {
+  if (!impl) {
+    return false;
+  }
+  HAL_FILE_WRAPPED_CALL(sync, );
+}
 size_t HalFile::getName(char* name, size_t len) { HAL_FILE_WRAPPED_CALL(getName, name, len); }
 size_t HalFile::size() { HAL_FILE_FORWARD_CALL(size, ); }              // already thread-safe, no need to wrap
 size_t HalFile::fileSize() { HAL_FILE_FORWARD_CALL(fileSize, ); }      // already thread-safe, no need to wrap
@@ -186,6 +202,13 @@ int HalFile::read() { HAL_FILE_WRAPPED_CALL(read, ); }
 size_t HalFile::write(const uint8_t* buf, size_t count) { HAL_FILE_WRAPPED_CALL(write, buf, count); }
 size_t HalFile::write(const void* buf, size_t count) { HAL_FILE_WRAPPED_CALL(write, buf, count); }
 size_t HalFile::write(uint8_t b) { HAL_FILE_WRAPPED_CALL(write, b); }
+void HalFile::clearWriteError() {
+  if (!impl) {
+    return;
+  }
+  HalStorage::StorageLock lock;
+  impl->file.clearWriteError();
+}
 bool HalFile::rename(const char* newPath) { HAL_FILE_WRAPPED_CALL(rename, newPath); }
 bool HalFile::isDirectory() const { HAL_FILE_FORWARD_CALL(isDirectory, ); }  // already thread-safe, no need to wrap
 void HalFile::rewindDirectory() { HAL_FILE_WRAPPED_CALL(rewindDirectory, ); }
