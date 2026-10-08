@@ -5,7 +5,7 @@ Example:
     python3 tools/xgf2/gen_xgf2.py --ttf NotoSerifCJKjp-Regular.otf --device x3 -o reading.xgf2
     python3 tools/xgf2/gen_xgf2.py --synthetic --codepoints あいう漢字 --em 16 --ruby-em 8 -o test.xgf2
 
-Copy the result to the SD card as /.crossxtch/reading.xgf2 (or next to a .txt as name.xgf2).
+Copy the result to the SD card as /.crossjp/reading.xgf2 (or next to a .txt as name.xgf2).
 """
 
 from __future__ import annotations

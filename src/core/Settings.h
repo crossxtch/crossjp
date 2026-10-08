@@ -6,8 +6,8 @@ struct Settings {
   static constexpr uint32_t MAGIC = 0x48585443;  // "HXTC"
   static constexpr uint16_t VERSION = 9;
   static constexpr uint16_t kMinVersion = 3;
-  static constexpr const char* kDir = "/.crossxtch";
-  static constexpr const char* kPath = "/.crossxtch/settings.bin";
+  static constexpr const char* kDir = "/.crossjp";
+  static constexpr const char* kPath = "/.crossjp/settings.bin";
   // trueSleepMinutes: 0 = none, else 5 / 10 / 15 minutes.
   static constexpr uint8_t kSleepNone = 0;
   static constexpr uint8_t kSleep5Min = 5;
@@ -30,7 +30,7 @@ struct Settings {
   uint8_t clockUtcOffsetQ = 48;    // 48 = UTC+0; 15-minute steps, 0 = UTC-12, 104 = UTC+14
   uint16_t ntpSyncYear = 0;        // UTC year of last NTP; 0 = never
   uint8_t ntpSyncMonth = 0;        // 1-12; NTP at most once per calendar month
-  char fontFile[80]{};             // basename in /.crossxtch/fonts/; empty = first installed
+  char fontFile[80]{};             // basename in /.crossjp/fonts/; empty = first installed
   uint8_t language = kLanguageUnset;  // kLanguageEnglish/Japanese/Chinese; unset until first pick
 
   void load();

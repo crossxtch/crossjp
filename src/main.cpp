@@ -10,8 +10,9 @@
 #include <HalSystem.h>
 #include <HalTiltSensor.h>
 #include <Logging.h>
+#include <ScratchHeap.h>
+#include <TypesetBook.h>
 #include <WiFi.h>
-#include <Xtch.h>
 #include <builtinFonts/all.h>
 
 #include "core/ScreenManager.h"
@@ -23,8 +24,8 @@
 #include "core/fontIds.h"
 #include "network/WifiCredentialStore.h"
 
-#ifndef CROSSXTCH_VERSION
-#define CROSSXTCH_VERSION "dev"
+#ifndef CROSSJP_VERSION
+#define CROSSJP_VERSION "dev"
 #endif
 
 Gfx gfx(display);
@@ -51,6 +52,19 @@ static const char* wakeupName(HalGPIO::WakeupReason reason) {
   }
 }
 
+// Cards written by the previous firmware name keep settings, fonts, and caches.
+static void migrateDataDir() {
+  constexpr const char* kOld = "/.crossxtch";
+  if (Storage.exists(Settings::kDir) || !Storage.exists(kOld)) {
+    return;
+  }
+  if (Storage.rename(kOld, Settings::kDir)) {
+    LOG_INF("MAIN", "Renamed %s -> %s", kOld, Settings::kDir);
+  } else {
+    LOG_ERR("MAIN", "Could not rename %s -> %s", kOld, Settings::kDir);
+  }
+}
+
 static void setupDisplayAndFonts() {
   display.begin();
   MappedInput::installBusyWaitPoll();
@@ -72,15 +86,15 @@ void setup() {
 
   HalSystem::begin();
   gpio.begin();
-  // Page buffer first, framebuffer second: see XtchBook::reserveScratchBuffers.
+  // Scratch hole first, framebuffer second: see ScratchHeap::reserve.
   // WifiSession::end() restarts so this runs again on a clean heap.
-  XtchBook::reserveScratchBuffers(BoardConfig::ACTIVE.displayWidth, BoardConfig::ACTIVE.displayHeight);
+  ScratchHeap::reserve(BoardConfig::ACTIVE.displayWidth, BoardConfig::ACTIVE.displayHeight);
   powerManager.begin();
   halTiltSensor.begin();
   halClock.begin();
 
   const auto wakeupReason = gpio.getWakeupReason();
-  LOG_INF("MAIN", "crossxtch " CROSSXTCH_VERSION " board=%s gpio=%s wake=%s bat=%u%% panic=%d",
+  LOG_INF("MAIN", "crossjp " CROSSJP_VERSION " board=%s gpio=%s wake=%s bat=%u%% panic=%d",
           BoardConfig::ACTIVE.name, gpio.deviceIsX3() ? "x3" : "x4", wakeupName(wakeupReason),
           static_cast<unsigned>(powerManager.getBatteryPercentage()), HalSystem::isRebootFromPanic() ? 1 : 0);
 
@@ -91,6 +105,7 @@ void setup() {
     return;
   }
   LOG_INF("MAIN", "SD ready");
+  migrateDataDir();
 
   HalSystem::checkPanic();
   settings.load();
@@ -143,7 +158,7 @@ void setup() {
   }
 
   if (wakeupReason == HalGPIO::WakeupReason::PowerButton && settings.lastBookPath[0] != '\0' &&
-      Storage.exists(settings.lastBookPath)) {
+      Storage.exists(settings.lastBookPath) && TypesetBook::hasBookExt(settings.lastBookPath)) {
     LOG_INF("MAIN", "Resume %s", settings.lastBookPath);
     screenManager.goToReader(settings.lastBookPath);
   } else {

@@ -15,7 +15,7 @@ class XgfFont {
   static constexpr uint32_t kLruBytes = 80 * 1024;
   static constexpr uint32_t kRubyLruBytes = 12 * 1024;
   static constexpr uint32_t kUiLruBytes = 16 * 1024;
-  static constexpr const char* kDefaultPath = "/.crossxtch/reading.xgf2";
+  static constexpr const char* kDefaultPath = "/.crossjp/reading.xgf2";
 
   XgfFont() = default;
   ~XgfFont() { close(); }

@@ -1,7 +1,6 @@
 #pragma once
 
 #include <TypesetBook.h>
-#include <Xtch.h>
 
 #include <memory>
 #include <vector>
@@ -10,14 +9,13 @@
 
 class ReaderScreen final : public Screen {
   char bookPath[256]{};
-  XtchBook xtch;
-  // Heap-allocated only for .txt/.epub so .xtch open does not need a contiguous
-  // TypesetBook (~24 KB of glyph-run arrays) while BrowserScreen is still alive.
-  std::unique_ptr<TypesetBook> typed;
-  bool typesetMode = false;
+  // Heap-allocated: TypesetBook holds ~24 KB of glyph-run arrays, and
+  // BrowserScreen is still alive when the reader opens.
+  std::unique_ptr<TypesetBook> book;
   uint32_t page = 0;
   int pagesUntilFull = 0;
   bool loaded = false;
+  const char* openError = "out of memory";
 
   unsigned long lastOpenProgressMs = 0;
 
@@ -28,7 +26,7 @@ class ReaderScreen final : public Screen {
   static void onOpenProgress(void* ctx, uint16_t done, uint16_t total);
   uint16_t bookPageCount() const;
   const char* bookError() const;
-  const std::vector<xtch::ChapterInfo>& bookChapters();
+  const std::vector<ts::ChapterInfo>& bookChapters();
 
  public:
   ReaderScreen(Gfx& gfx, MappedInput& input, const char* path);

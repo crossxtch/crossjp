@@ -79,7 +79,7 @@ void BrowserScreen::load() {
       row += '/';
       entries.push_back(std::move(row));
     } else if (mode == Mode::Firmware ? hasExt(name, ".bin")
-                                     : (hasExt(name, ".xtch") || hasExt(name, ".txt") || hasExt(name, ".epub"))) {
+                                     : (hasExt(name, ".txt") || hasExt(name, ".epub"))) {
       entries.emplace_back(name);
     }
   }

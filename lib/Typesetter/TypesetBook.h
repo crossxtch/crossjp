@@ -1,12 +1,12 @@
 #pragma once
 
 #include <XgfFont.h>
-#include <Xtch.h>
 
 #include <cstdint>
 #include <vector>
 
 #include "AtomFile.h"
+#include "ChapterInfo.h"
 #include "Epub.h"
 #include "Layout.h"
 #include "TextIr.h"
@@ -29,7 +29,7 @@ class TypesetBook {
   const char* path() const { return filepath; }
   const char* lastError() const { return error; }
 
-  const std::vector<xtch::ChapterInfo>& getChapters() const { return chapters; }
+  const std::vector<ts::ChapterInfo>& getChapters() const { return chapters; }
   XgfFont* cjkFont() { return font.loaded() ? &font : nullptr; }
 
   bool drawPage(Gfx& gfx, uint32_t pageIndex, int& pagesUntilFullRefresh, int refreshFrequency);
@@ -37,7 +37,6 @@ class TypesetBook {
   void flushPendingCleanup(Gfx& gfx);
 
   static bool hasBookExt(const char* path);
-  static bool hasTextExt(const char* path) { return hasBookExt(path); }
 
  private:
   char filepath[256]{};
@@ -49,7 +48,7 @@ class TypesetBook {
   ts::PageLayouter layouter;
   ts::LayoutOptions layoutOpt{};
   std::vector<uint32_t> pageOffsets;
-  std::vector<xtch::ChapterInfo> chapters;
+  std::vector<ts::ChapterInfo> chapters;
   struct ChapterMark {
     uint32_t atomOff = 0;
     char name[80]{};

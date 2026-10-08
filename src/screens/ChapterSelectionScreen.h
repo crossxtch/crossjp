@@ -1,7 +1,7 @@
 #pragma once
 
+#include <ChapterInfo.h>
 #include <XgfFont.h>
-#include <XtchTypes.h>
 
 #include <vector>
 
@@ -11,7 +11,7 @@ class ReaderScreen;
 
 class ChapterSelectionScreen final : public Screen {
   ReaderScreen& reader;
-  std::vector<xtch::ChapterInfo> chapters;
+  std::vector<ts::ChapterInfo> chapters;
   uint32_t currentPage;
   uint16_t pageCount;
   int index = 0;
@@ -23,7 +23,7 @@ class ChapterSelectionScreen final : public Screen {
 
  public:
   ChapterSelectionScreen(Gfx& gfx, MappedInput& input, ReaderScreen& reader,
-                         const std::vector<xtch::ChapterInfo>& chapterList, uint32_t currentPage,
+                         const std::vector<ts::ChapterInfo>& chapterList, uint32_t currentPage,
                          uint16_t pageCount);
   void onEnter() override;
   void onExit() override;

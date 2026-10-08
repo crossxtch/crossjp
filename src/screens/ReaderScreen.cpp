@@ -30,22 +30,21 @@ ReaderScreen::ReaderScreen(Gfx& gfx, MappedInput& input, const char* path) : Scr
   snprintf(bookPath, sizeof(bookPath), "%s", path ? path : "");
 }
 
-uint16_t ReaderScreen::bookPageCount() const {
-  return (typesetMode && typed) ? typed->pageCount() : xtch.pageCount();
-}
+uint16_t ReaderScreen::bookPageCount() const { return book ? book->pageCount() : 0; }
 
 const char* ReaderScreen::bookError() const {
-  if (typesetMode) {
-    return typed ? typed->lastError() : "out of memory";
+  if (book) {
+    const char* err = book->lastError();
+    if (err && err[0] != '\0') {
+      return err;
+    }
   }
-  return xtch::errorName(xtch.lastError());
+  return openError;
 }
 
-const std::vector<xtch::ChapterInfo>& ReaderScreen::bookChapters() {
-  return (typesetMode && typed) ? typed->getChapters() : xtch.getChapters();
-}
+const std::vector<ts::ChapterInfo>& ReaderScreen::bookChapters() { return book->getChapters(); }
 
-XgfFont* ReaderScreen::cjkFont() { return (loaded && typed) ? typed->cjkFont() : nullptr; }
+XgfFont* ReaderScreen::cjkFont() { return (loaded && book) ? book->cjkFont() : nullptr; }
 
 void ReaderScreen::loadProgress() {
   char p[64];
@@ -81,22 +80,21 @@ void ReaderScreen::saveProgress() const {
 void ReaderScreen::onEnter() {
   Screen::onEnter();
   pagesUntilFull = settings.refreshEveryNPages;
-  typesetMode = TypesetBook::hasTextExt(bookPath);
   lastOpenProgressMs = 0;
   bool ok = false;
-  if (typesetMode) {
-    typed = makeUniqueNoThrow<TypesetBook>();
-    if (!typed) {
-      LOG_ERR("RDR", "OOM: typeset");
-    } else {
-      char fontPath[192];
-      if (!ReadingFont::activePath(fontPath, sizeof(fontPath))) {
-        fontPath[0] = '\0';
-      }
-      ok = typed->open(bookPath, &ReaderScreen::onOpenProgress, this, fontPath[0] ? fontPath : nullptr);
-    }
+  book = makeUniqueNoThrow<TypesetBook>();
+  if (!book) {
+    openError = "out of memory";
+    LOG_ERR("RDR", "OOM: typeset");
   } else {
-    ok = xtch.open(bookPath) == xtch::Error::Ok;
+    char fontPath[192];
+    if (!ReadingFont::activePath(fontPath, sizeof(fontPath))) {
+      fontPath[0] = '\0';
+    }
+    ok = book->open(bookPath, &ReaderScreen::onOpenProgress, this, fontPath[0] ? fontPath : nullptr);
+    if (!ok) {
+      openError = book->lastError();
+    }
   }
   if (!ok) {
     LOG_ERR("RDR", "Failed to open %s: %s", bookPath, bookError());
@@ -113,7 +111,7 @@ void ReaderScreen::onEnter() {
   snprintf(settings.lastBookPath, sizeof(settings.lastBookPath), "%s", bookPath);
   settings.save();
   LOG_INF("RDR", "Open %s page %lu/%u '%s'", bookPath, static_cast<unsigned long>(page + 1), bookPageCount(),
-          typed ? typed->title() : xtch.title());
+          book->title());
   requestUpdate();
 }
 
@@ -121,11 +119,9 @@ void ReaderScreen::onExit() {
   if (loaded) {
     saveProgress();
   }
-  if (typed) {
-    typed->close();
-    typed.reset();
-  } else {
-    xtch.close();
+  if (book) {
+    book->close();
+    book.reset();
   }
   halTiltSensor.clearPendingEvents();
   Screen::onExit();
@@ -144,10 +140,8 @@ void ReaderScreen::loop() {
   // Opportunistic: finish any deferred post-page-render RAM cleanup here,
   // before checking input, so it lands in idle time rather than the next
   // page's blocking render.
-  if (typed) {
-    typed->flushPendingCleanup(gfx);
-  } else {
-    xtch.flushPendingCleanup(gfx);
+  if (book) {
+    book->flushPendingCleanup(gfx);
   }
 
   if (input.wasReleased(MappedInput::Button::Back)) {
@@ -260,8 +254,7 @@ void ReaderScreen::render() {
   }
 
   const unsigned long blitStart = millis();
-  const bool painted = typed ? typed->drawPage(gfx, page, pagesUntilFull, settings.refreshEveryNPages)
-                             : xtch.drawPage(gfx, page, pagesUntilFull, settings.refreshEveryNPages);
+  const bool painted = book && book->drawPage(gfx, page, pagesUntilFull, settings.refreshEveryNPages);
   if (!painted) {
     LOG_ERR("RDR", "Blit page %lu failed: %s", static_cast<unsigned long>(page), bookError());
     showStatus(uiText::error(bookError()));
@@ -277,10 +270,8 @@ void ReaderScreen::render() {
   // during the blit; loading N+1 would delay that jump by ~146 ms.
   const int queued = input.queuedPageDelta();
   if (queued >= 0 && queued <= 1) {
-    if (typed) {
-      typed->prefetchForward(page);
-    } else {
-      xtch.prefetchForward(page);
+    if (book) {
+      book->prefetchForward(page);
     }
   } else {
     LOG_DBG("RDR", "Skip prefetch (queued delta %d)", queued);

@@ -18,7 +18,7 @@
 #include "screens/ReaderScreen.h"
 
 ChapterSelectionScreen::ChapterSelectionScreen(Gfx& gfx, MappedInput& input, ReaderScreen& reader,
-                                               const std::vector<xtch::ChapterInfo>& chapterList,
+                                               const std::vector<ts::ChapterInfo>& chapterList,
                                                const uint32_t currentPage, const uint16_t pageCount)
     : Screen("Chapters", gfx, input),
       reader(reader),
@@ -98,7 +98,7 @@ void ChapterSelectionScreen::render() {
     if (i == 0) {
       snprintf(label, sizeof(label), uiText::goToPageRange, static_cast<unsigned long>(currentPage + 1), pageCount);
     } else {
-      const xtch::ChapterInfo& chapter = chapters[static_cast<size_t>(i - 1)];
+      const ts::ChapterInfo& chapter = chapters[static_cast<size_t>(i - 1)];
       if (chapter.name.empty()) {
         snprintf(label, sizeof(label), uiText::chapterN, i, chapter.startPage + 1, chapter.endPage + 1);
       } else {

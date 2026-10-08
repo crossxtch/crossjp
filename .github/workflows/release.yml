@@ -1,7 +1,7 @@
 name: Release
 
-# Push a tag like v0.1.0 (must match [crossxtch] version in platformio.ini).
-# Builds x3 and x4 and attaches crossxtch-x3.bin / crossxtch-x4.bin to a GitHub Release.
+# Push a tag like v0.1.0 (must match [crossjp] version in platformio.ini).
+# Builds x3 and x4 and attaches crossjp-x3.bin / crossjp-x4.bin to a GitHub Release.
 
 on:
   push:
@@ -19,9 +19,9 @@ jobs:
       matrix:
         include:
           - pio_env: x3
-            asset: crossxtch-x3.bin
+            asset: crossjp-x3.bin
           - pio_env: x4
-            asset: crossxtch-x4.bin
+            asset: crossjp-x4.bin
     steps:
       - uses: actions/checkout@v6
         with:
@@ -82,12 +82,12 @@ jobs:
           NOTES: |
             Download the .bin for your device. Copy it to the SD card, then Settings → Update firmware (or hold Up + Power at wake).
 
-            - `crossxtch-x3.bin` — Xteink X3 (528×792 pages)
-            - `crossxtch-x4.bin` — Xteink X4 (480×800 pages)
+            - `crossjp-x3.bin` — Xteink X3 (528×792 pages)
+            - `crossjp-x4.bin` — Xteink X4 (480×800 pages)
         run: |
           gh release create "${{ github.ref_name }}" \
-            dist/crossxtch-x3.bin \
-            dist/crossxtch-x4.bin \
+            dist/crossjp-x3.bin \
+            dist/crossjp-x4.bin \
             --repo "${{ github.repository }}" \
             --title "${{ github.ref_name }}" \
             --generate-notes \

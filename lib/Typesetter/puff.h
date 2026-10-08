@@ -26,12 +26,11 @@
  * See puff.c for purpose and usage.
  *
  * Vendored from https://github.com/madler/zlib/tree/master/contrib/puff
- * for XTCH page decompression (raw DEFLATE, no zlib/gzip wrapper). Chosen over
- * zlib's inflate for its tiny footprint (~4K code, <2K stack, no heap use) since
- * decode speed is not the bottleneck here (e-ink refresh dominates page turns).
+ * for EPUB zip inflation (raw DEFLATE, no zlib/gzip wrapper). Chosen over
+ * zlib's inflate for its tiny footprint (~4K code, <2K stack, no heap use).
  *
- * Altered from upstream: puff_stream() inflates from a refill callback so the
- * compressed page does not have to sit in a single heap allocation.
+ * Altered from upstream: puff_stream() inflates from a refill callback so a
+ * compressed member does not have to sit in a single heap allocation.
  */
 #ifndef NIL
 #  define NIL ((unsigned char *)0)      /* for no output option */

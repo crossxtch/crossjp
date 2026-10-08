@@ -5,6 +5,7 @@
 #include <HalPowerManager.h>
 #include <HalStorage.h>
 #include <Logging.h>
+#include <TypesetBook.h>
 #include <XgfFont.h>
 
 #include <cstdio>
@@ -16,7 +17,8 @@
 #include "core/fontIds.h"
 
 void HomeScreen::refreshMenu() {
-  const bool hasContinue = settings.lastBookPath[0] != '\0' && Storage.exists(settings.lastBookPath);
+  const bool hasContinue = settings.lastBookPath[0] != '\0' && Storage.exists(settings.lastBookPath) &&
+                           TypesetBook::hasBookExt(settings.lastBookPath);
   itemCount = hasContinue ? 4 : 3;
   if (index >= itemCount) {
     index = 0;

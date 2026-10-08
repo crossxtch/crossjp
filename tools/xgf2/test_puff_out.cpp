@@ -1,4 +1,4 @@
-// c++ -std=c++20 -I lib/Xtch tools/xgf2/test_puff_out.cpp lib/Xtch/puff.c -o /tmp/test_puff_out && /tmp/test_puff_out
+// c++ -std=c++20 -I lib/Typesetter tools/xgf2/test_puff_out.cpp lib/Typesetter/puff.c -o /tmp/test_puff_out && /tmp/test_puff_out
 #include "puff.h"
 
 #include <cstdint>

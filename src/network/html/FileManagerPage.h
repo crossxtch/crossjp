@@ -9,7 +9,7 @@ static const char FILE_MANAGER_PAGE[] PROGMEM = R"HTML(<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark">
 <meta name="theme-color" content="#0a0a0a">
-<title>crossxtch file transfer</title>
+<title>crossjp file transfer</title>
 <style>
 :root {
   --bg: #0a0a0a;
@@ -217,14 +217,14 @@ footer {
 <body>
 <div class="wrap">
   <div class="eyebrow">file transfer</div>
-  <h1>crossxtch</h1>
+  <h1>crossjp</h1>
   <nav id="path"></nav>
   <div id="dropZone">
     <div class="drop-kicker">upload</div>
     <div class="drop-title">Drop a file</div>
-    <div class="drop-sub">.epub · .xtch · .xgf2 fonts · firmware .bin</div>
+    <div class="drop-sub">.epub · .txt · .xgf2 fonts · firmware .bin</div>
   </div>
-  <input type="file" id="fileInput" accept=".epub,.xtch,.txt,.xgf2,.bin">
+  <input type="file" id="fileInput" accept=".epub,.txt,.xgf2,.bin">
   <div id="uploadProgress"><span id="uploadBar"></span></div>
   <div id="toolbar">
     <button id="cancelUpload" onclick="cancelUpload()">Cancel</button>
@@ -250,7 +250,7 @@ footer {
     </div>
   </section>
   <div id="status"></div>
-  <footer id="foot">crossxtch</footer>
+  <footer id="foot">crossjp</footer>
 </div>
 <script>
 let path = "/";
@@ -276,7 +276,7 @@ function resetUploadUi() {
   document.getElementById("cancelUpload").style.display = "none";
   dropZone.classList.remove("busy");
   dropZone.querySelector(".drop-title").textContent = "Drop a file";
-  dropZone.querySelector(".drop-sub").textContent = ".epub · .xtch · .xgf2 fonts · firmware .bin";
+  dropZone.querySelector(".drop-sub").textContent = ".epub · .txt · .xgf2 fonts · firmware .bin";
   document.getElementById("fileInput").value = "";
 }
 
@@ -621,7 +621,7 @@ tzSelect.onchange = () => {
 };
 
 fetch("/api/status").then(r => r.json()).then(s => {
-  const bits = ["crossxtch"];
+  const bits = ["crossjp"];
   if (s.version) bits.push(s.version);
   if (s.ssid) bits.push(s.ssid);
   if (s.ip) bits.push(s.ip);

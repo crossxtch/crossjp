@@ -76,11 +76,6 @@
   X(sdCardError, "SD card error", "SDカードエラー", "SD卡错误")                                                        \
   X(loading, "Loading...", "読み込み中...", "正在加载...")                                                             \
   X(invalidFormat, "Invalid format", "形式が違います", "格式无效")                                                    \
-  X(unsupportedVersion, "Unsupported version", "非対応の版", "不支持的版本")                                          \
-  X(corrupted, "Corrupted", "破損しています", "文件损坏")                                                             \
-  X(pageOutOfRange, "Page out of range", "ページ範囲外", "页码超出范围")                                               \
-  X(pageTooLarge, "Larger than screen", "画面より大きい", "大于屏幕")                                                 \
-  X(decodeFailed, "Decode failed", "展開に失敗", "解压失败")                                                          \
   X(unknownError, "Unknown error", "不明なエラー", "未知错误")                                                        \
   X(fileTooSmall, "File too small", "ファイルが小さい", "文件过小")                                                   \
   X(fileTooLarge, "File too large", "ファイルが大きい", "文件过大")                                                   \

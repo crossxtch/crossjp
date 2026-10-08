@@ -3,7 +3,7 @@
 #include <BoardConfig.h>
 #include <Gfx.h>
 #include <Logging.h>
-#include <Xtch.h>
+#include <ScratchHeap.h>
 
 #include <cstdio>
 #include <cstring>
@@ -62,11 +62,11 @@ bool TypesetBook::hasBookExt(const char* path) {
 }
 
 void TypesetBook::indexPath(char* out, const size_t outSize) const {
-  snprintf(out, outSize, "/.crossxtch/t_%08lx.bin", static_cast<unsigned long>(pathHash(filepath)));
+  snprintf(out, outSize, "/.crossjp/t_%08lx.bin", static_cast<unsigned long>(pathHash(filepath)));
 }
 
 void TypesetBook::chapterPath(char* out, const size_t outSize) const {
-  snprintf(out, outSize, "/.crossxtch/c_%08lx.bin", static_cast<unsigned long>(pathHash(filepath)));
+  snprintf(out, outSize, "/.crossjp/c_%08lx.bin", static_cast<unsigned long>(pathHash(filepath)));
 }
 
 bool TypesetBook::loadFont(const char* fontPath) {
@@ -89,11 +89,15 @@ bool TypesetBook::open(const char* path, ts::EpubBook::ProgressFn progress, void
     error = "no path";
     return false;
   }
+  if (!hasBookExt(path)) {
+    error = "unsupported book";
+    return false;
+  }
   snprintf(filepath, sizeof(filepath), "%s", path);
   copyBasename(bookTitle, sizeof(bookTitle), filepath);
 
   const unsigned long t0 = millis();
-  XtchBook::releaseScratchBuffers();
+  ScratchHeap::release();
 
   const unsigned long tFont = millis();
   if (!loadFont(fontPath)) {
@@ -110,8 +114,8 @@ bool TypesetBook::open(const char* path, ts::EpubBook::ProgressFn progress, void
   layoutOpt.compactColumns = false;
   layoutOpt.mode = ts::WritingMode::VerticalRl;
 
-  snprintf(atomPath, sizeof(atomPath), "/.crossxtch/a_%08lx.bin", static_cast<unsigned long>(pathHash(filepath)));
-  Storage.ensureDirectoryExists("/.crossxtch");
+  snprintf(atomPath, sizeof(atomPath), "/.crossjp/a_%08lx.bin", static_cast<unsigned long>(pathHash(filepath)));
+  Storage.ensureDirectoryExists("/.crossjp");
 
   bookSrcSize = fileSizeOf(filepath);
   sourceSize = fileSizeOf(atomPath);
@@ -171,7 +175,7 @@ void TypesetBook::close() {
   loadedPage = 0xFFFFFFFFu;
   loadedCount = 0;
   cleanupPending = false;
-  XtchBook::reserveScratchBuffers(BoardConfig::ACTIVE.displayWidth, BoardConfig::ACTIVE.displayHeight);
+  ScratchHeap::reserve(BoardConfig::ACTIVE.displayWidth, BoardConfig::ACTIVE.displayHeight);
 }
 
 bool TypesetBook::ingestTxt() {
@@ -310,7 +314,7 @@ void TypesetBook::applyChapters() {
   }
   chapters.reserve(chapterMarks.size());
   for (const auto& m : chapterMarks) {
-    xtch::ChapterInfo ch;
+    ts::ChapterInfo ch;
     ch.name = m.name;
     ch.startPage = pageForAtom(m.atomOff);
     ch.endPage = ch.startPage;
@@ -391,7 +395,7 @@ bool TypesetBook::loadIndex() {
 bool TypesetBook::saveIndex() const {
   char p[64];
   indexPath(p, sizeof(p));
-  Storage.ensureDirectoryExists("/.crossxtch");
+  Storage.ensureDirectoryExists("/.crossjp");
   HalFile idx;
   if (!Storage.openFileForWrite("TS", p, idx)) {
     return false;

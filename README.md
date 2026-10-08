@@ -1,6 +1,6 @@
-# crossxtch
+# crossjp
 
-XTCH reader for the Xteink X3 and X4. Books are `.xtch` files on the SD card: pre-rendered 2-bit page bitmaps. This firmware blits them. It does not lay out text, scale pages, or read `.xtc`.
+EPUB and plain-text reader for the Xteink X3 and X4. Books are `.epub` and `.txt` files on the SD card. This firmware typesets them. It does not read `.xtch` or `.xtc`.
 
 One firmware binary per device. Pages are rendered for that panel:
 
@@ -18,13 +18,14 @@ src/screens/          home, browser, reader, chapters, settings, update
 src/platform/         chip workarounds
 lib/hal               hardware wrappers (still CrossPoint-shaped)
 lib/Gfx               portrait framebuffer + UI text
-lib/Xtch              XTCH container + page blit
+lib/Typesetter        EPUB and UTF-8 text layout
+lib/XgfFont           reading font
 lib/EpdFont           Ubuntu UI fonts
 reference/            CrossPoint submodule (lookup only)
 freeink-sdk/          display and board support
 ```
 
-Settings and per-book progress live in `/.crossxtch` on the SD card.
+Settings and per-book progress live in `/.crossjp` on the SD card.
 Boot and runtime logs go to the Serial console only (no SD log file).
 
 Firmware update from SD (same idea as CrossPoint):
@@ -47,14 +48,14 @@ pio device monitor
 
 ## Release
 
-Bump `[crossxtch] version` in `platformio.ini` to match the tag, push `develop`, then:
+Bump `[crossjp] version` in `platformio.ini` to match the tag, push `develop`, then:
 
 ```bash
 git tag -a v0.1.0 -m "v0.1.0"
 git push origin v0.1.0
 ```
 
-GitHub Actions builds `crossxtch-x3.bin` and `crossxtch-x4.bin` and attaches them to a GitHub Release for that tag.
+GitHub Actions builds `crossjp-x3.bin` and `crossjp-x4.bin` and attaches them to a GitHub Release for that tag.
 
 Optional `platformio.local.ini` for a local upload port (gitignored).
 

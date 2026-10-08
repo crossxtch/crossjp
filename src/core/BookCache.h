@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-// Sidecar files under /.crossxtch keyed by FNV-1a of the book path:
+// Sidecar files under /.crossjp keyed by FNV-1a of the book path:
 // a_*.bin atoms, t_*.bin page index, c_*.bin chapter TOC, p_*.bin progress.
 namespace BookCache {
 

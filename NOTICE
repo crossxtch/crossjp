@@ -1,9 +1,10 @@
 Copied files retain their original copyright.
 
 - lib/hal, lib/Logging, lib/Memory/Memory.h, lib/Utf8, lib/EpdFont
-  (except builtinFonts/all.h), src/platform/skip_efuse_blk_check.c,
-  and the XTCH on-disk layout in lib/Xtch/XtchTypes.h come from
-  CrossPoint Reader, MIT License, Copyright (c) 2025 Dave Allie.
+  (except builtinFonts/all.h), and src/platform/skip_efuse_blk_check.c
+  come from CrossPoint Reader, MIT License, Copyright (c) 2025 Dave Allie.
+- lib/Typesetter/puff.c and puff.h are from zlib contrib/puff,
+  Copyright (C) 2002-2013 Mark Adler. Altered to inflate from a refill callback.
 - Ubuntu font binaries under lib/EpdFont/builtinFonts/ are generated from
   Ubuntu (UFL) and Noto (OFL) sources, same as in the CrossPoint tree.
 - jp_12 is generated from Noto Sans JP Medium (SIL Open Font License 1.1),

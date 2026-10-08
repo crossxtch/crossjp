@@ -19,8 +19,8 @@
 #include "screens/FontsScreen.h"
 #include "screens/LanguageScreen.h"
 
-#ifndef CROSSXTCH_VERSION
-#define CROSSXTCH_VERSION "dev"
+#ifndef CROSSJP_VERSION
+#define CROSSJP_VERSION "dev"
 #endif
 
 namespace {
@@ -243,6 +243,6 @@ void SettingsScreen::render() {
     ui::drawMenuRow(gfx, startY + i * rowH, rowH, labels[i], i == index);
   }
 
-  gfx.drawCenteredText(FONT_UI, gfx.height() - 40, "crossxtch " CROSSXTCH_VERSION);
+  gfx.drawCenteredText(FONT_UI, gfx.height() - 40, "crossjp " CROSSJP_VERSION);
   presentUi();
 }

@@ -10,7 +10,7 @@ class WifiCredentialStore {
   static constexpr uint32_t MAGIC = 0x46495758;  // "WXIF" (byte-swapped "WIFX")
   static constexpr uint16_t VERSION = 2;
   static constexpr uint16_t kMinVersion = 1;
-  static constexpr const char* kPath = "/.crossxtch/wifi.bin";
+  static constexpr const char* kPath = "/.crossjp/wifi.bin";
   static constexpr int kMaxNetworks = 5;
   static constexpr size_t kSsidLen = 33;      // 32 chars + NUL, per 802.11 max SSID length
   static constexpr size_t kPasswordLen = 64;  // 63 chars + NUL, per WPA2 max passphrase length

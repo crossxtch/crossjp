@@ -3,13 +3,13 @@
 #include <Arduino.h>
 #include <Gfx.h>
 #include <Logging.h>
-#include <Xtch.h>
+#include <ScratchHeap.h>
 
 #include "core/UiText.h"
 #include "core/fontIds.h"
 #include "network/WifiManager.h"
 
-void WifiSession::begin() { XtchBook::releaseScratchBuffers(); }
+void WifiSession::begin() { ScratchHeap::release(); }
 
 [[noreturn]] void WifiSession::end(Gfx& gfx) {
   wifiManager.disconnect();

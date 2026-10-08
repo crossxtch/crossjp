@@ -239,7 +239,7 @@ bool EpubBook::open(const char* epubPath, const char* atomPath, ProgressFn progr
     }
     free(xml);
     if (!parsed) {
-      const char* tmp = "/.crossxtch/work.xhtml";
+      const char* tmp = "/.crossjp/work.xhtml";
       if (!zip.extractToFile(*ent, tmp)) {
         LOG_ERR("EPUB", "extract %s (%u bytes): %s", items[i].href, static_cast<unsigned>(ent->uncompSize),
                 zip.lastError());
